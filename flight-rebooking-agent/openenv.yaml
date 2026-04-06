@@ -1,0 +1,10 @@
+name: "flight-rebooking-env"
+version: "1.0.0"
+description: "A multi-constraint optimization environment for rebooking airline passengers during mass disruptions."
+tags:
+  - operations-research
+  - logistics
+  - agentic-workflow
+author: "Hackathon Team"
+license: "MIT"
+entrypoint: "environment:FlightRebookingEnv"
