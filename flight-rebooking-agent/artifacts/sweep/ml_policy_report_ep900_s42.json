@@ -1,0 +1,63 @@
+{
+  "seed": 42,
+  "output_artifact": "d:\\meta\\flight-rebooking-agent\\artifacts\\sweep\\ml_policy_ep900_s42.pkl",
+  "dataset": {
+    "samples": 14400,
+    "feature_length": 56,
+    "episodes_per_task": 900,
+    "task_episode_mean_scores": {
+      "easy": 0.9966,
+      "medium": 0.9337,
+      "hard": 0.9192
+    }
+  },
+  "metrics": {
+    "train_accuracy": 1.0,
+    "val_accuracy": 0.998611,
+    "classification_report": {
+      "book_hotel": {
+        "precision": 1.0,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.8,
+        "support": 3.0
+      },
+      "offer_downgrade": {
+        "precision": 0.990990990990991,
+        "recall": 1.0,
+        "f1-score": 0.995475113122172,
+        "support": 110.0
+      },
+      "rebook_on_partner": {
+        "precision": 0.9459459459459459,
+        "recall": 0.9722222222222222,
+        "f1-score": 0.958904109589041,
+        "support": 36.0
+      },
+      "rebook_passenger": {
+        "precision": 1.0,
+        "recall": 0.9995027349577325,
+        "f1-score": 0.9997513056453619,
+        "support": 2011.0
+      },
+      "accuracy": 0.9986111111111111,
+      "macro avg": {
+        "precision": 0.9842342342342343,
+        "recall": 0.9095979059616554,
+        "f1-score": 0.9385326320891437,
+        "support": 2160.0
+      },
+      "weighted avg": {
+        "precision": 0.9986403069736403,
+        "recall": 0.9986111111111111,
+        "f1-score": 0.9985753176117904,
+        "support": 2160.0
+      }
+    }
+  },
+  "canonical_task_scores": {
+    "easy": 1.0,
+    "medium": 0.9768,
+    "hard": 0.9609,
+    "overall": 0.9792
+  }
+}
