@@ -1,21 +1,22 @@
 """
-Task Definitions & Grading
-============================
-Contains scenario data for the flight rebooking environment and
-the grading function that scores agent performance.
+Task Definitions and Deterministic Graders
+===========================================
+
+Provides three progressively difficult real-world disruption tasks and
+task-specific grading functions that return normalized scores in [0.0, 1.0].
 """
+
+from typing import Dict, List
 
 from environment import EnvState, PassengerStatus, PriorityTier
 
 
-# ============================================================
-# TASK: EASY — Minor Disruption
-# ============================================================
-# Scenario: Flight FL-100 to New York is cancelled.
-# 3 passengers, plenty of seats, generous budget.
-
 EASY_TASK = {
+    "task_id": "easy_minor_disruption",
+    "difficulty": "easy",
+    "objective": "Rebook all passengers on same-airline flights while preserving premium service and minimizing spend.",
     "max_budget": 3000,
+    "max_steps": 40,
     "passengers": [
         {
             "id": "P1",
@@ -71,14 +72,12 @@ EASY_TASK = {
 }
 
 
-# ============================================================
-# TASK: MEDIUM — Connection Crisis
-# ============================================================
-# Scenario: Flight FL-300 to Chicago is cancelled.
-# 5 passengers, tight connections, limited seats, tighter budget.
-
 MEDIUM_TASK = {
+    "task_id": "medium_connection_crisis",
+    "difficulty": "medium",
+    "objective": "Prioritize high-tier passengers with tight deadlines under constrained seats and budget.",
     "max_budget": 5000,
+    "max_steps": 60,
     "passengers": [
         {
             "id": "P1",
@@ -150,21 +149,140 @@ MEDIUM_TASK = {
 }
 
 
-# ============================================================
-# GRADING FUNCTION
-# ============================================================
-
-# Outcome weights determine how much credit each resolution gets
-_OUTCOME_SCORES = {
-    PassengerStatus.REBOOKED: 1.0,           # Full credit
-    PassengerStatus.PARTNER_REBOOKED: 0.95,   # Slightly less (expensive)
-    PassengerStatus.DOWNGRADED: 0.70,         # Partial — comfort lost
-    PassengerStatus.HOTEL_BOOKED: 0.30,       # Minimal — not at destination
-    PassengerStatus.NO_SOLUTION: -0.20,       # Penalty
-    PassengerStatus.PENDING: 0.0,             # Forgotten passengers
+HARD_TASK = {
+    "task_id": "hard_multi_wave_disruption",
+    "difficulty": "hard",
+    "objective": "Handle mixed loyalty tiers, scarce seats, and multiple urgent connections while staying under budget.",
+    "max_budget": 7000,
+    "max_steps": 90,
+    "passengers": [
+        {
+            "id": "P1",
+            "name": "Iris Patel",
+            "priority_tier": "Platinum",
+            "original_flight": "FL-500",
+            "cabin_class": "Business",
+            "connection_deadline_hrs": 2.5,
+        },
+        {
+            "id": "P2",
+            "name": "Jack Rivera",
+            "priority_tier": "Gold",
+            "original_flight": "FL-500",
+            "cabin_class": "Economy",
+            "connection_deadline_hrs": 2.0,
+        },
+        {
+            "id": "P3",
+            "name": "Karen Novak",
+            "priority_tier": "Gold",
+            "original_flight": "FL-500",
+            "cabin_class": "Business",
+            "connection_deadline_hrs": 4.0,
+        },
+        {
+            "id": "P4",
+            "name": "Liam Chen",
+            "priority_tier": "Silver",
+            "original_flight": "FL-500",
+            "cabin_class": "Economy",
+            "connection_deadline_hrs": 3.0,
+        },
+        {
+            "id": "P5",
+            "name": "Maya Brooks",
+            "priority_tier": "Standard",
+            "original_flight": "FL-500",
+            "cabin_class": "Economy",
+            "connection_deadline_hrs": None,
+        },
+        {
+            "id": "P6",
+            "name": "Noah Singh",
+            "priority_tier": "Platinum",
+            "original_flight": "FL-500",
+            "cabin_class": "Business",
+            "connection_deadline_hrs": 3.5,
+        },
+        {
+            "id": "P7",
+            "name": "Olivia Green",
+            "priority_tier": "Silver",
+            "original_flight": "FL-500",
+            "cabin_class": "Economy",
+            "connection_deadline_hrs": 5.0,
+        },
+        {
+            "id": "P8",
+            "name": "Peter Hall",
+            "priority_tier": "Standard",
+            "original_flight": "FL-500",
+            "cabin_class": "Economy",
+            "connection_deadline_hrs": 2.8,
+        },
+    ],
+    "flights": [
+        {
+            "id": "FL-502",
+            "destination": "San Francisco",
+            "departure_hrs": 1.8,
+            "economy_seats": 2,
+            "business_seats": 1,
+            "is_partner": False,
+        },
+        {
+            "id": "FL-504",
+            "destination": "San Francisco",
+            "departure_hrs": 3.0,
+            "economy_seats": 2,
+            "business_seats": 1,
+            "is_partner": False,
+        },
+        {
+            "id": "FL-506",
+            "destination": "San Francisco",
+            "departure_hrs": 5.5,
+            "economy_seats": 3,
+            "business_seats": 0,
+            "is_partner": False,
+        },
+        {
+            "id": "FL-701",
+            "destination": "San Francisco",
+            "departure_hrs": 2.2,
+            "economy_seats": 2,
+            "business_seats": 1,
+            "is_partner": True,
+        },
+        {
+            "id": "FL-703",
+            "destination": "San Francisco",
+            "departure_hrs": 4.4,
+            "economy_seats": 2,
+            "business_seats": 1,
+            "is_partner": True,
+        },
+    ],
 }
 
-# Priority tier importance weights
+
+TASKS = {
+    "easy": EASY_TASK,
+    "medium": MEDIUM_TASK,
+    "hard": HARD_TASK,
+}
+
+
+_OUTCOME_SCORES = {
+    PassengerStatus.REBOOKED: 1.00,
+    PassengerStatus.PARTNER_REBOOKED: 0.85,
+    PassengerStatus.DOWNGRADED: 0.65,
+    PassengerStatus.HOTEL_BOOKED: 0.40,
+    PassengerStatus.NO_SOLUTION: 0.00,
+    PassengerStatus.PENDING: 0.00,
+}
+
+
 _TIER_WEIGHTS = {
     PriorityTier.PLATINUM: 4,
     PriorityTier.GOLD: 3,
@@ -173,70 +291,188 @@ _TIER_WEIGHTS = {
 }
 
 
-def grade_episode(state: EnvState, max_budget: float) -> float:
-    """
-    Grade the agent's performance on a single episode.
+_GRADING_PROFILES = {
+    "easy": {
+        "quality": 0.45,
+        "coverage": 0.20,
+        "connection": 0.10,
+        "budget": 0.15,
+        "policy": 0.10,
+    },
+    "medium": {
+        "quality": 0.38,
+        "coverage": 0.17,
+        "connection": 0.22,
+        "budget": 0.13,
+        "policy": 0.10,
+    },
+    "hard": {
+        "quality": 0.30,
+        "coverage": 0.15,
+        "connection": 0.30,
+        "budget": 0.15,
+        "policy": 0.10,
+    },
+}
 
-    Scoring formula:
-      1. Each passenger earns `tier_weight * outcome_score`.
-      2. A connection bonus/penalty is applied for passengers with deadlines.
-      3. A budget-efficiency multiplier rewards frugal spending.
-      4. Final score is clamped to [0.0, 1.0].
 
-    Args:
-        state: The final EnvState after the episode.
-        max_budget: The maximum allowed budget for the task.
+def _clamp(value: float) -> float:
+    return max(0.0, min(1.0, value))
 
-    Returns:
-        A float score between 0.0 and 1.0.
-    """
-    total_score = 0.0
-    max_possible = 0.0
 
-    for passenger in state.passengers:
-        # Resolve tier (handle both enum and string)
-        tier = passenger.priority_tier
-        if isinstance(tier, str):
-            tier = PriorityTier(tier)
+def _resolve_tier_weight(tier: PriorityTier) -> int:
+    if isinstance(tier, str):
+        tier = PriorityTier(tier)
+    return _TIER_WEIGHTS.get(tier, 1)
 
-        tier_weight = _TIER_WEIGHTS.get(tier, 1)
-        max_possible += tier_weight
 
-        # Base outcome score
-        status = passenger.status
-        if isinstance(status, str):
-            status = PassengerStatus(status)
+def _resolve_outcome_score(status: PassengerStatus) -> float:
+    if isinstance(status, str):
+        status = PassengerStatus(status)
+    return _OUTCOME_SCORES.get(status, 0.0)
 
-        outcome = _OUTCOME_SCORES.get(status, 0.0)
-        passenger_score = tier_weight * outcome
 
-        # Connection-deadline bonus/penalty
-        if passenger.connection_deadline_hrs is not None:
-            if passenger.assigned_flight is not None:
-                # Find the assigned flight's departure time
-                assigned = next(
-                    (f for f in state.flights if f.id == passenger.assigned_flight),
-                    None,
-                )
-                if assigned and assigned.departure_hrs <= passenger.connection_deadline_hrs:
-                    passenger_score += tier_weight * 0.15  # Connection saved bonus
-                elif assigned:
-                    passenger_score -= tier_weight * 0.10  # Connection missed penalty
-            elif status in (PassengerStatus.NO_SOLUTION, PassengerStatus.PENDING):
-                passenger_score -= tier_weight * 0.10  # Missed connection entirely
+def _connection_score(state: EnvState) -> float:
+    deadline_passengers = [p for p in state.passengers if p.connection_deadline_hrs is not None]
+    if not deadline_passengers:
+        return 1.0
 
-        total_score += passenger_score
+    weighted_hits = 0.0
+    weighted_total = 0.0
 
-    if max_possible <= 0:
+    flights_by_id = {f.id: f for f in state.flights}
+    for passenger in deadline_passengers:
+        weight = _resolve_tier_weight(passenger.priority_tier)
+        weighted_total += weight
+
+        if passenger.assigned_flight is None:
+            continue
+
+        flight = flights_by_id.get(passenger.assigned_flight)
+        if flight is None:
+            continue
+
+        if flight.departure_hrs <= passenger.connection_deadline_hrs:
+            weighted_hits += weight
+        else:
+            weighted_hits += weight * 0.2
+
+    if weighted_total <= 0:
         return 0.0
 
-    # Normalize to [0, 1] range
-    raw = total_score / max_possible
+    return _clamp(weighted_hits / weighted_total)
 
-    # Budget efficiency multiplier: spending less is better
-    # Full budget usage gets 0.9x, spending nothing gets 1.0x
-    budget_ratio = state.budget_spent / max_budget if max_budget > 0 else 0
-    budget_multiplier = 1.0 - (budget_ratio * 0.1)
 
-    final = raw * budget_multiplier
-    return max(0.0, min(1.0, final))
+def _coverage_score(state: EnvState) -> float:
+    if not state.passengers:
+        return 0.0
+    resolved = sum(1 for p in state.passengers if p.status != PassengerStatus.PENDING)
+    return _clamp(resolved / len(state.passengers))
+
+
+def _quality_score(state: EnvState) -> float:
+    weighted_sum = 0.0
+    weighted_total = 0.0
+
+    for passenger in state.passengers:
+        weight = _resolve_tier_weight(passenger.priority_tier)
+        weighted_total += weight
+        weighted_sum += weight * _resolve_outcome_score(passenger.status)
+
+    if weighted_total <= 0:
+        return 0.0
+
+    return _clamp(weighted_sum / weighted_total)
+
+
+def _budget_score(state: EnvState, max_budget: float) -> float:
+    if max_budget <= 0:
+        return 1.0
+    return _clamp(1.0 - (state.budget_spent / max_budget))
+
+
+def _policy_score(state: EnvState) -> float:
+    invalid_actions = max(getattr(state, "invalid_actions", 0), 0)
+    invalid_penalty = min(invalid_actions * 0.03, 0.3)
+
+    order: Dict[str, int] = {}
+    step = 0
+    for event in state.actions_taken:
+        if not event.get("success", False):
+            continue
+        action = event.get("action", {})
+        passenger_id = action.get("passenger_id")
+        if passenger_id and passenger_id not in order:
+            order[passenger_id] = step
+            step += 1
+
+    inversion_pairs = 0
+    total_pairs = 0
+    passengers = list(state.passengers)
+    for i in range(len(passengers)):
+        for j in range(i + 1, len(passengers)):
+            p_i = passengers[i]
+            p_j = passengers[j]
+            w_i = _resolve_tier_weight(p_i.priority_tier)
+            w_j = _resolve_tier_weight(p_j.priority_tier)
+            if w_i == w_j:
+                continue
+
+            if p_i.id not in order or p_j.id not in order:
+                continue
+
+            total_pairs += 1
+            if w_i > w_j and order[p_i.id] > order[p_j.id]:
+                inversion_pairs += 1
+            if w_j > w_i and order[p_j.id] > order[p_i.id]:
+                inversion_pairs += 1
+
+    inversion_penalty = (inversion_pairs / total_pairs) if total_pairs > 0 else 0.0
+    return _clamp(1.0 - invalid_penalty - inversion_penalty)
+
+
+def _grade_with_profile(state: EnvState, max_budget: float, profile_name: str) -> float:
+    profile = _GRADING_PROFILES[profile_name]
+    quality = _quality_score(state)
+    coverage = _coverage_score(state)
+    connection = _connection_score(state)
+    budget = _budget_score(state, max_budget)
+    policy = _policy_score(state)
+
+    final = (
+        profile["quality"] * quality
+        + profile["coverage"] * coverage
+        + profile["connection"] * connection
+        + profile["budget"] * budget
+        + profile["policy"] * policy
+    )
+    return _clamp(final)
+
+
+def grade_easy_episode(state: EnvState, max_budget: float) -> float:
+    return _grade_with_profile(state, max_budget, "easy")
+
+
+def grade_medium_episode(state: EnvState, max_budget: float) -> float:
+    return _grade_with_profile(state, max_budget, "medium")
+
+
+def grade_hard_episode(state: EnvState, max_budget: float) -> float:
+    return _grade_with_profile(state, max_budget, "hard")
+
+
+TASK_GRADERS = {
+    "easy": grade_easy_episode,
+    "medium": grade_medium_episode,
+    "hard": grade_hard_episode,
+}
+
+
+def grade_task(task_key: str, state: EnvState, max_budget: float) -> float:
+    grader = TASK_GRADERS[task_key]
+    return grader(state, max_budget)
+
+
+def grade_episode(state: EnvState, max_budget: float) -> float:
+    """Backward-compatible default grader, mapped to medium difficulty."""
+    return grade_medium_episode(state, max_budget)
