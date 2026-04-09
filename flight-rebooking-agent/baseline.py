@@ -1,188 +1,424 @@
 """
-Baseline Agent Runner
-======================
-Uses Meta Llama 3.1 (8B Instruct) via an OpenAI-compatible API to observe
-the environment, reason about optimal actions, and loop until done.
+Reproducible Baseline Runner
+============================
 
-Supported providers (set API_BASE_URL env var):
-  - Together AI:  https://api.together.xyz/v1
-  - Groq:         https://api.groq.com/openai/v1
-  - Fireworks:    https://api.fireworks.ai/inference/v1
-  - Ollama:       http://localhost:11434/v1
+Runs an OpenAI model against all flight-rebooking tasks using deterministic
+settings and reports normalized scores in [0.0, 1.0].
 """
 
+import argparse
+import json
 import os
 import re
-import json
+from typing import Any, Dict, List, Optional
+
 from openai import OpenAI
-from environment import FlightRebookingEnv, Action
-from tasks import EASY_TASK, MEDIUM_TASK, grade_episode
 
-# ==========================================
-# MODEL & API CONFIGURATION
-# ==========================================
-# Default to Together AI — change API_BASE_URL for other providers
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.together.xyz/v1")
-API_KEY = os.getenv("API_KEY", os.getenv("TOGETHER_API_KEY", ""))
+from environment import Action, ActionType, CabinClass, FlightRebookingEnv, PriorityTier
+from tasks import TASKS, grade_task
 
-# Model name varies by provider — override with MODEL_NAME env var if needed
-# Together AI:  meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
-# Groq:         llama-3.1-8b-instant
-# Fireworks:    accounts/fireworks/models/llama-v3p1-8b-instruct
-# Ollama:       llama3.1:8b
-MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
 
-client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
+DEFAULT_API_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_OPEN_SOURCE_MODEL = "llama-3.1-8b-instant"
+INTERNAL_GROQ_API_KEY = ""
 
-# ==========================================
-# THE CORE SYSTEM PROMPT
-# ==========================================
-SYSTEM_PROMPT = """You are an AI Flight Disruption Agent. A massive storm has cancelled flights, and you must rebook the pending passengers.
 
-YOUR GOAL:
-Maximize customer satisfaction and save flight connections while respecting priority tiers (Platinum > Gold > Silver > Standard) and staying under budget.
+SYSTEM_PROMPT = """You are an airline disruption operations agent.
 
-AVAILABLE ACTIONS:
-1. "rebook_passenger": Move passenger to a new flight in their original cabin (Free).
-2. "offer_downgrade": Move Business passenger to Economy. Costs $500 in compensation.
-3. "book_hotel": Give passenger a hotel for the night. Costs $250.
-4. "rebook_on_partner": Put passenger on a partner airline flight. Costs $800.
-5. "mark_no_solution": Give up on the passenger. (Heavy penalty).
-6. "finalize": Use this ONLY when all passengers are processed.
-
-INSTRUCTIONS:
-- Process ONE passenger at a time.
-- Pay attention to `connection_deadline_hrs`. Prioritize these passengers!
-- Platinum and Gold members MUST be processed before Standard members if seats are limited.
-- Do not exceed the budget.
-- Do NOT include any explanation or commentary. Output ONLY raw JSON.
-
-You must output ONLY valid JSON matching this exact schema:
+Return exactly one JSON object on each turn with this schema:
 {
   "action_type": "rebook_passenger" | "offer_downgrade" | "book_hotel" | "rebook_on_partner" | "mark_no_solution" | "finalize",
-  "passenger_id": "string (e.g., 'P1')",
-  "flight_id": "string (optional, e.g., 'FL-102')"
-}"""
+  "passenger_id": "optional passenger id",
+  "flight_id": "optional flight id"
+}
+
+Behavior policy:
+- Process one pending passenger per step.
+- Respect priority tiers (Platinum > Gold > Silver > Standard).
+- For same tier, prioritize tighter connection deadlines.
+- Prefer same-airline rebooking over partner booking when feasible.
+- Keep spend low and avoid invalid actions.
+- Emit raw JSON only. No markdown, no explanations.
+"""
 
 
-def extract_json(text: str) -> dict:
-    """
-    Robustly extract JSON from LLM output.
-    Llama models sometimes wrap JSON in markdown code blocks or add commentary.
-    """
-    # Try direct parse first
-    text = text.strip()
+def extract_json(text: str) -> Dict[str, Any]:
+    text = (text or "").strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Try extracting from markdown code block ```json ... ```
-    code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if code_block:
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        return json.loads(match.group(1))
+
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        return json.loads(match.group(0))
+
+    raise ValueError(f"No valid JSON action found in model output: {text[:200]}")
+
+
+def _first_non_empty(*values: str) -> str:
+    for value in values:
+        cleaned = (value or "").strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _tier_weight(tier: str) -> int:
+    return {
+        PriorityTier.PLATINUM.value: 4,
+        PriorityTier.GOLD.value: 3,
+        PriorityTier.SILVER.value: 2,
+        PriorityTier.STANDARD.value: 1,
+    }.get(tier, 1)
+
+
+def _has_seat(flight: Dict[str, Any], cabin_class: str) -> bool:
+    if cabin_class == CabinClass.BUSINESS.value:
+        return flight["business_seats"] > 0
+    return flight["economy_seats"] > 0
+
+
+def heuristic_action(observation: Dict[str, Any]) -> Dict[str, Any]:
+    pending = list(observation["pending_passengers"])
+    if not pending:
+        return {"action_type": ActionType.FINALIZE.value}
+
+    pending.sort(
+        key=lambda p: (
+            -_tier_weight(p["priority_tier"]),
+            p["connection_deadline_hrs"] if p["connection_deadline_hrs"] is not None else 10**9,
+        )
+    )
+
+    passenger = pending[0]
+    flights = sorted(observation["available_flights"], key=lambda f: f["departure_hrs"])
+
+    for flight in flights:
+        if flight["is_partner"]:
+            continue
+        if _has_seat(flight, passenger["cabin_class"]):
+            return {
+                "action_type": ActionType.REBOOK_PASSENGER.value,
+                "passenger_id": passenger["id"],
+                "flight_id": flight["id"],
+            }
+
+    if passenger["cabin_class"] == CabinClass.BUSINESS.value:
+        for flight in flights:
+            if flight["is_partner"]:
+                continue
+            if flight["economy_seats"] > 0 and observation["budget_remaining"] >= 500:
+                return {
+                    "action_type": ActionType.OFFER_DOWNGRADE.value,
+                    "passenger_id": passenger["id"],
+                    "flight_id": flight["id"],
+                }
+
+    for flight in flights:
+        if not flight["is_partner"]:
+            continue
+        if _has_seat(flight, passenger["cabin_class"]) and observation["budget_remaining"] >= 800:
+            return {
+                "action_type": ActionType.REBOOK_ON_PARTNER.value,
+                "passenger_id": passenger["id"],
+                "flight_id": flight["id"],
+            }
+
+    if observation["budget_remaining"] >= 250:
+        return {
+            "action_type": ActionType.BOOK_HOTEL.value,
+            "passenger_id": passenger["id"],
+        }
+
+    return {
+        "action_type": ActionType.MARK_NO_SOLUTION.value,
+        "passenger_id": passenger["id"],
+    }
+
+
+def is_action_feasible(observation: Dict[str, Any], payload: Dict[str, Any]) -> bool:
+    action_type = payload["action_type"]
+    if action_type == ActionType.FINALIZE.value:
+        return True
+
+    pending_by_id = {p["id"]: p for p in observation["pending_passengers"]}
+    flights_by_id = {f["id"]: f for f in observation["available_flights"]}
+    budget_remaining = float(observation["budget_remaining"])
+
+    passenger = pending_by_id.get(payload.get("passenger_id"))
+    if passenger is None:
+        return False
+
+    if action_type == ActionType.BOOK_HOTEL.value:
+        return budget_remaining >= 250
+
+    if action_type == ActionType.MARK_NO_SOLUTION.value:
+        return True
+
+    flight = flights_by_id.get(payload.get("flight_id"))
+    if flight is None:
+        return False
+
+    passenger_cabin = passenger["cabin_class"]
+    needs_business = passenger_cabin == CabinClass.BUSINESS.value
+    has_matching_cabin_seat = (flight["business_seats"] > 0) if needs_business else (flight["economy_seats"] > 0)
+
+    if action_type == ActionType.REBOOK_PASSENGER.value:
+        return (not flight["is_partner"]) and has_matching_cabin_seat
+
+    if action_type == ActionType.OFFER_DOWNGRADE.value:
+        return (
+            passenger_cabin == CabinClass.BUSINESS.value
+            and budget_remaining >= 500
+            and flight["economy_seats"] > 0
+        )
+
+    if action_type == ActionType.REBOOK_ON_PARTNER.value:
+        return flight["is_partner"] and budget_remaining >= 800 and has_matching_cabin_seat
+
+    return False
+
+
+def sanitize_action_payload(observation: Dict[str, Any], payload: Any) -> Dict[str, Any]:
+    fallback = heuristic_action(observation)
+
+    if not isinstance(payload, dict):
+        return fallback
+
+    valid_action_types = {action_type.value for action_type in ActionType}
+    action_type = str(payload.get("action_type", "")).strip()
+    if action_type not in valid_action_types:
+        return fallback
+
+    sanitized: Dict[str, Any] = {"action_type": action_type}
+    passenger_id = str(payload.get("passenger_id", "")).strip()
+    flight_id = str(payload.get("flight_id", "")).strip()
+
+    if passenger_id:
+        sanitized["passenger_id"] = passenger_id
+    if flight_id:
+        sanitized["flight_id"] = flight_id
+
+    if action_type == ActionType.FINALIZE.value:
+        return sanitized
+
+    pending_ids = {p["id"] for p in observation["pending_passengers"]}
+    if sanitized.get("passenger_id") not in pending_ids:
+        return fallback
+
+    if action_type in {
+        ActionType.REBOOK_PASSENGER.value,
+        ActionType.OFFER_DOWNGRADE.value,
+        ActionType.REBOOK_ON_PARTNER.value,
+    }:
+        flight_ids = {f["id"] for f in observation["available_flights"]}
+        if sanitized.get("flight_id") not in flight_ids:
+            return fallback
+
+    if not is_action_feasible(observation, sanitized):
+        return fallback
+
+    return sanitized
+
+
+def query_openai_action(
+    client: OpenAI,
+    model: str,
+    seed: int,
+    observation_json: str,
+    max_retries: int = 2,
+) -> Dict[str, Any]:
+    last_error: Optional[Exception] = None
+
+    for _ in range(max_retries + 1):
         try:
-            return json.loads(code_block.group(1))
-        except json.JSONDecodeError:
-            pass
+            kwargs = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": f"Current observation: {observation_json}"},
+                ],
+                "temperature": 0,
+                "top_p": 1,
+                "seed": seed,
+                "max_tokens": 200,
+            }
 
-    # Try finding the first { ... } in the text
-    brace_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
-    if brace_match:
-        try:
-            return json.loads(brace_match.group(0))
-        except json.JSONDecodeError:
-            pass
+            try:
+                response = client.chat.completions.create(**kwargs)
+            except TypeError:
+                # Some providers do not support seed on chat completions.
+                kwargs.pop("seed", None)
+                response = client.chat.completions.create(**kwargs)
 
-    raise ValueError(f"Could not extract valid JSON from model output: {text[:200]}")
+            content = response.choices[0].message.content or ""
+            return extract_json(content)
+        except Exception as exc:
+            last_error = exc
+
+    raise RuntimeError(f"OpenAI action query failed after retries: {last_error}")
 
 
-def run_evaluation(task_data, task_name):
-    """Run a single evaluation episode."""
-    print(f"\n--- Starting Task: {task_name} ---")
+def run_episode(
+    task_key: str,
+    task_data: Dict[str, Any],
+    policy: str,
+    model: str,
+    seed: int,
+    client: Optional[OpenAI],
+) -> Dict[str, Any]:
     env = FlightRebookingEnv(task_data=task_data)
-    obs = env.reset()
+    observation = env.reset()
     done = False
-    retries = 0
-    max_retries = 3
+    step_rewards: List[float] = []
+    steps = 0
 
     while not done:
-        # 1. Ask the AI what to do
-        try:
-            response = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"Current State: {obs.model_dump_json()}"},
-                ],
-                temperature=0.1,  # Low temp for consistency (Llama can be 0 but 0.1 is safer)
-                max_tokens=256,   # Actions are short — save tokens
+        observation_dict = observation.model_dump(mode="json")
+
+        if policy == "heuristic":
+            action_payload = heuristic_action(observation_dict)
+        else:
+            raw_payload = query_openai_action(
+                client=client,
+                model=model,
+                seed=seed,
+                observation_json=observation.model_dump_json(),
             )
-        except Exception as e:
-            print(f"API call failed: {e}")
-            if retries < max_retries:
-                retries += 1
-                print(f"Retrying... ({retries}/{max_retries})")
-                continue
-            print("Max retries reached. Forcing finalize.")
-            action = Action(action_type="finalize")
-            obs, reward, done, info = env.step(action)
-            continue
+            action_payload = sanitize_action_payload(observation_dict, raw_payload)
 
-        # 2. Parse the AI's JSON output (with robust extraction for Llama)
-        raw_output = response.choices[0].message.content or ""
         try:
-            action_dict = extract_json(raw_output)
-            action = Action(**action_dict)
-            retries = 0  # Reset retries on success
-        except Exception as e:
-            print(f"  [WARN] Invalid output from model. Error: {e}")
-            if retries < max_retries:
-                retries += 1
-                print(f"  Retrying... ({retries}/{max_retries})")
-                continue
-            print("  Max retries reached. Forcing finalize.")
-            action = Action(action_type="finalize")
+            action = Action(**action_payload)
+        except Exception:
+            action = Action(action_type=ActionType.FINALIZE)
 
-        # 3. Take the action in the environment
-        obs, reward, done, info = env.step(action)
+        observation, reward, done, _ = env.step(action)
+        step_rewards.append(reward.value)
+        steps += 1
 
-        # Print what the AI did for the terminal demo
-        if action.action_type != "finalize":
-            target = f"Passenger: {action.passenger_id}"
-            if action.flight_id:
-                target += f" -> Flight: {action.flight_id}"
-            print(f"  Action: {action.action_type.upper()} | {target} | Reward: {reward:.2f}")
+    final_state = env.state()
+    final_score = grade_task(task_key, final_state, task_data["max_budget"])
 
-        # Print any errors from the environment
-        if "error" in info:
-            print(f"  [ENV ERROR] {info['error']}")
+    return {
+        "task": task_key,
+        "difficulty": task_data["difficulty"],
+        "score": round(final_score, 4),
+        "avg_step_reward": round(sum(step_rewards) / max(len(step_rewards), 1), 4),
+        "steps": steps,
+        "budget_spent": round(final_state.budget_spent, 2),
+        "budget_max": task_data["max_budget"],
+        "invalid_actions": final_state.invalid_actions,
+    }
 
-    # 4. Grade the final result
-    final_score = grade_episode(env.state(), task_data["max_budget"])
-    print(f"  Task '{task_name}' Completed. Score: {final_score:.2f} / 1.00")
-    print(f"  Budget Spent: ${env.state().budget_spent} / ${task_data['max_budget']}")
-    return final_score
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run reproducible baselines on all OpenEnv tasks.")
+    parser.add_argument(
+        "--policy",
+        choices=["openai", "heuristic"],
+        default="openai",
+        help="Policy backend. `openai` uses chat completions, `heuristic` is deterministic fallback.",
+    )
+    parser.add_argument(
+        "--model",
+        default=_first_non_empty(
+            os.getenv("OPENAI_MODEL", ""),
+            os.getenv("MODEL_NAME", ""),
+            DEFAULT_OPEN_SOURCE_MODEL,
+        ),
+        help="Model name for --policy openai.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=int(os.getenv("BASELINE_SEED", "42")),
+        help="Random seed forwarded to the OpenAI API when supported.",
+    )
+    parser.add_argument(
+        "--task",
+        choices=["all", "easy", "medium", "hard"],
+        default="all",
+        help="Run a single task or all tasks.",
+    )
+    parser.add_argument(
+        "--json-out",
+        default="",
+        help="Optional path to write JSON results.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    task_keys = ["easy", "medium", "hard"] if args.task == "all" else [args.task]
+
+    client: Optional[OpenAI] = None
+    if args.policy == "openai":
+        api_key = _first_non_empty(
+            os.getenv("OPENAI_API_KEY", ""),
+            os.getenv("HF_TOKEN", ""),
+            os.getenv("GROQ_API_KEY", ""),
+            INTERNAL_GROQ_API_KEY,
+        )
+        if not api_key:
+            raise SystemExit(
+                "OPENAI_API_KEY is not set. Set it in your environment or use --policy heuristic."
+            )
+
+        base_url = _first_non_empty(
+            os.getenv("OPENAI_BASE_URL", ""),
+            os.getenv("API_BASE_URL", ""),
+            DEFAULT_API_BASE_URL,
+        )
+        client = OpenAI(api_key=api_key, base_url=base_url)
+
+    print(f"Policy: {args.policy}")
+    print(f"Model: {args.model}")
+    print(f"Seed: {args.seed}")
+
+    results: List[Dict[str, Any]] = []
+    for task_key in task_keys:
+        task_data = TASKS[task_key]
+        print(f"\n--- Running {task_key.upper()} ({task_data['task_id']}) ---")
+        result = run_episode(
+            task_key=task_key,
+            task_data=task_data,
+            policy=args.policy,
+            model=args.model,
+            seed=args.seed,
+            client=client,
+        )
+        results.append(result)
+        print(
+            "Score={score:.4f} | AvgStepReward={avg_step_reward:.4f} | "
+            "Steps={steps} | Budget=${budget_spent:.2f}/${budget_max:.2f} | Invalid={invalid_actions}".format(
+                **result
+            )
+        )
+
+    overall = sum(r["score"] for r in results) / max(len(results), 1)
+    print("\n" + "=" * 70)
+    print(f"Overall Average Score: {overall:.4f} / 1.0000")
+    print("=" * 70)
+
+    payload = {
+        "policy": args.policy,
+        "model": args.model,
+        "seed": args.seed,
+        "overall_score": round(overall, 4),
+        "tasks": results,
+    }
+
+    if args.json_out:
+        with open(args.json_out, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+        print(f"Saved results to: {args.json_out}")
 
 
 if __name__ == "__main__":
-    if not API_KEY:
-        print("Error: Please set your API_KEY (or TOGETHER_API_KEY) environment variable.")
-        print(f"  Current API base: {API_BASE_URL}")
-        print(f"  Current model:    {MODEL_NAME}")
-        print()
-        print("Examples:")
-        print("  set API_KEY=your-together-api-key")
-        print("  set API_BASE_URL=https://api.together.xyz/v1")
-        print("  set MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
-        exit(1)
-
-    print(f"Using model: {MODEL_NAME}")
-    print(f"API base:    {API_BASE_URL}")
-
-    scores = []
-    scores.append(run_evaluation(EASY_TASK, "Easy - Minor Disruption"))
-    scores.append(run_evaluation(MEDIUM_TASK, "Medium - Connection Crisis"))
-
-    print("\n" + "=" * 50)
-    print(f"Overall Average Score: {sum(scores) / len(scores):.2f} / 1.00")
-    print("=" * 50)
+    main()

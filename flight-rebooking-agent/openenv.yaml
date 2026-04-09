@@ -1,10 +1,42 @@
-name: "flight-rebooking-env"
-version: "1.0.0"
-description: "A multi-constraint optimization environment for rebooking airline passengers during mass disruptions."
-tags:
-  - operations-research
-  - logistics
-  - agentic-workflow
+name: "flight-rebooking-openenv"
+version: "2.0.0"
+description: "Real-world airline disruption simulator with typed OpenEnv models and deterministic task graders."
 author: "Hackathon Team"
 license: "MIT"
+python_version: "3.10"
 entrypoint: "environment:FlightRebookingEnv"
+
+models:
+  observation: "environment:Observation"
+  action: "environment:Action"
+  reward: "environment:Reward"
+
+api:
+  reset: "FlightRebookingEnv.reset"
+  step: "FlightRebookingEnv.step"
+  state: "FlightRebookingEnv.state"
+
+tasks:
+  - key: "easy"
+    id: "easy_minor_disruption"
+    difficulty: "easy"
+    grader: "tasks:grade_easy_episode"
+    objective: "Rebook all passengers with minimal spend."
+  - key: "medium"
+    id: "medium_connection_crisis"
+    difficulty: "medium"
+    grader: "tasks:grade_medium_episode"
+    objective: "Save urgent connections while honoring tier priority."
+  - key: "hard"
+    id: "hard_multi_wave_disruption"
+    difficulty: "hard"
+    grader: "tasks:grade_hard_episode"
+    objective: "Optimize across loyalty, deadlines, and budget scarcity."
+
+tags:
+  - openenv
+  - airline-operations
+  - decision-making
+  - logistics
+  - reinforcement-learning
+  - huggingface-space

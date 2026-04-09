@@ -1,14 +1,17 @@
 FROM python:3.10-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+	&& pip install --no-cache-dir -r /app/requirements.txt
+
 COPY . /app
 
-# Install standard dependencies
-RUN pip install --no-cache-dir pydantic openai pyyaml
+EXPOSE 7860
 
-# Environment variables (override at runtime)
-ENV API_BASE_URL=https://api.together.xyz/v1
-ENV MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
-
-# Command to run the agent evaluation
-CMD ["python", "baseline.py"]
+# Hugging Face Spaces (Docker SDK) listens on port 7860.
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
