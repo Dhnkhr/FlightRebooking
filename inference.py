@@ -815,7 +815,7 @@ def main() -> None:
         done = False
         steps = 0
         rewards: List[float] = []
-        score = 0.0
+        score = 0.01
         success = False
         episode_error: Optional[str] = None
 
@@ -903,10 +903,10 @@ def main() -> None:
                 score = float(grade_task(task_key, final_state, task_data["max_budget"]))
             except Exception as exc:
                 episode_error = str(exc)
-                score = 0.0
+                score = 0.01
         except Exception as exc:
             episode_error = str(exc)
-            score = 0.0
+            score = 0.01
         finally:
             close_fn = getattr(env, "close", None)
             if callable(close_fn):
