@@ -102,7 +102,9 @@ def ui_page() -> FileResponse:
 
 
 @app.post("/reset")
-def reset_default(request: CreateSessionRequest) -> Dict[str, Any]:
+def reset_default(request: CreateSessionRequest = None) -> Dict[str, Any]:
+    if request is None:
+        request = CreateSessionRequest()
     task_key = request.task.lower()
     return _create_env_session(task_key=task_key, session_id=_DEFAULT_SESSION_ID)
 
@@ -148,7 +150,9 @@ def list_tasks() -> Dict[str, Any]:
 
 
 @app.post("/sessions")
-def create_session(request: CreateSessionRequest) -> Dict[str, Any]:
+def create_session(request: CreateSessionRequest = None) -> Dict[str, Any]:
+    if request is None:
+        request = CreateSessionRequest()
     task_key = request.task.lower()
     session_id = str(uuid4())
     return _create_env_session(task_key=task_key, session_id=session_id)
