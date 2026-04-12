@@ -317,7 +317,7 @@ _GRADING_PROFILES = {
 
 
 def _clamp(value: float) -> float:
-    return max(0.0, min(1.0, value))
+    return max(0.0001, min(0.9999, value))
 
 
 def _resolve_tier_weight(tier: PriorityTier) -> int:
