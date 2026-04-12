@@ -317,7 +317,7 @@ _GRADING_PROFILES = {
 
 
 def _clamp(value: float) -> float:
-    return max(0.0001, min(0.9999, value))
+    return max(0.01, min(0.99, value))
 
 
 def _resolve_tier_weight(tier: PriorityTier) -> int:
@@ -335,7 +335,7 @@ def _resolve_outcome_score(status: PassengerStatus) -> float:
 def _connection_score(state: EnvState) -> float:
     deadline_passengers = [p for p in state.passengers if p.connection_deadline_hrs is not None]
     if not deadline_passengers:
-        return 0.9999
+        return 0.99
 
     weighted_hits = 0.0
     weighted_total = 0.0
@@ -358,14 +358,14 @@ def _connection_score(state: EnvState) -> float:
             weighted_hits += weight * 0.2
 
     if weighted_total <= 0:
-        return 0.0001
+        return 0.01
 
     return _clamp(weighted_hits / weighted_total)
 
 
 def _coverage_score(state: EnvState) -> float:
     if not state.passengers:
-        return 0.0001
+        return 0.01
     resolved = sum(1 for p in state.passengers if p.status != PassengerStatus.PENDING)
     return _clamp(resolved / len(state.passengers))
 
@@ -380,14 +380,14 @@ def _quality_score(state: EnvState) -> float:
         weighted_sum += weight * _resolve_outcome_score(passenger.status)
 
     if weighted_total <= 0:
-        return 0.0001
+        return 0.01
 
     return _clamp(weighted_sum / weighted_total)
 
 
 def _budget_score(state: EnvState, max_budget: float) -> float:
     if max_budget <= 0:
-        return 0.9999
+        return 0.99
     return _clamp(1.0 - (state.budget_spent / max_budget))
 
 
@@ -472,10 +472,10 @@ def grade_task(task_key: str, state: EnvState, max_budget: float) -> float:
     grader = TASK_GRADERS[task_key]
     score = grader(state, max_budget)
     # Enforce strict (0, 1) bounds required by the validator
-    return max(0.0001, min(0.9999, float(score)))
+    return max(0.01, min(0.99, float(score)))
 
 
 def grade_episode(state: EnvState, max_budget: float) -> float:
     """Backward-compatible default grader, mapped to medium difficulty."""
     score = grade_medium_episode(state, max_budget)
-    return max(0.0001, min(0.9999, float(score)))
+    return max(0.01, min(0.99, float(score)))

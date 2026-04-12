@@ -180,13 +180,13 @@ class FlightRebookingEnv:
         info: Dict[str, Any] = {}
 
         if self._state.finalized:
-            reward = Reward(value=0.0001, components={"terminal": 1.0}, notes=["episode_already_finalized"])
+            reward = Reward(value=0.01, components={"terminal": 1.0}, notes=["episode_already_finalized"])
             return self._get_observation(), reward, True, {"warning": "Episode already finalized."}
 
         if self._step_count > self._max_steps:
             self._state.finalized = True
             reward = Reward(
-                value=0.0001,
+                value=0.01,
                 components={
                     "progress": self._completion_ratio(),
                     "budget_efficiency": self._budget_efficiency(),
@@ -334,7 +334,7 @@ class FlightRebookingEnv:
         self._state.invalid_actions += 1
         penalty = min(0.08 * self._state.invalid_actions, 0.5)
         return Reward(
-            value=max(0.0001, 0.05 - penalty),
+            value=max(0.01, 0.05 - penalty),
             components={
                 "progress": self._completion_ratio(),
                 "budget_efficiency": self._budget_efficiency(),
@@ -550,7 +550,7 @@ class FlightRebookingEnv:
         )
 
     def _clamp(self, value: float) -> float:
-        return max(0.0001, min(0.9999, value))
+        return max(0.01, min(0.99, value))
 
     def _get_observation(self) -> Observation:
         pending_passengers: List[Dict[str, Any]] = []
