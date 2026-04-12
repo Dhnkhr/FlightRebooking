@@ -1,0 +1,44 @@
+{
+  "configs": [
+    {
+      "tag": "d1_w8",
+      "depth": 1,
+      "width": 8,
+      "overall": 0.9794,
+      "hard": 0.9614,
+      "result": "d:\\meta\\flight-rebooking-agent\\artifacts\\lookahead_tuning\\trained_ml_d1_w8.json"
+    },
+    {
+      "tag": "d2_w8",
+      "depth": 2,
+      "width": 8,
+      "overall": 0.9836,
+      "hard": 0.9739,
+      "result": "d:\\meta\\flight-rebooking-agent\\artifacts\\lookahead_tuning\\trained_ml_d2_w8.json"
+    },
+    {
+      "tag": "d2_w12",
+      "depth": 2,
+      "width": 12,
+      "overall": 0.9843,
+      "hard": 0.9761,
+      "result": "d:\\meta\\flight-rebooking-agent\\artifacts\\lookahead_tuning\\trained_ml_d2_w12.json"
+    },
+    {
+      "tag": "d3_w6",
+      "depth": 3,
+      "width": 6,
+      "overall": 0.9836,
+      "hard": 0.9739,
+      "result": "d:\\meta\\flight-rebooking-agent\\artifacts\\lookahead_tuning\\trained_ml_d3_w6.json"
+    }
+  ],
+  "best": {
+    "tag": "d2_w12",
+    "depth": 2,
+    "width": 12,
+    "overall": 0.9843,
+    "hard": 0.9761,
+    "result": "d:\\meta\\flight-rebooking-agent\\artifacts\\lookahead_tuning\\trained_ml_d2_w12.json"
+  }
+}

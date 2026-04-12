@@ -1,0 +1,45 @@
+{
+  "policy_requested": "trained_ml",
+  "policy_effective": "trained_ml",
+  "seed": 42,
+  "api_base_url": "heuristic",
+  "model_name": "heuristic",
+  "ml_policy_path": "d:\\meta\\flight-rebooking-agent\\artifacts\\sweep\\ml_policy_ep900_s42.pkl",
+  "ml_policy_loaded": true,
+  "overall_score": 0.9794,
+  "tasks": [
+    {
+      "task": "easy",
+      "task_id": "easy_minor_disruption",
+      "difficulty": "easy",
+      "steps": 3,
+      "avg_step_reward": 0.9,
+      "score": 1.0,
+      "budget_spent": 0.0,
+      "budget_max": 3000,
+      "invalid_actions": 0
+    },
+    {
+      "task": "medium",
+      "task_id": "medium_connection_crisis",
+      "difficulty": "medium",
+      "steps": 5,
+      "avg_step_reward": 0.8235,
+      "score": 0.9768,
+      "budget_spent": 500.0,
+      "budget_max": 5000,
+      "invalid_actions": 0
+    },
+    {
+      "task": "hard",
+      "task_id": "hard_multi_wave_disruption",
+      "difficulty": "hard",
+      "steps": 8,
+      "avg_step_reward": 0.7911,
+      "score": 0.9614,
+      "budget_spent": 800.0,
+      "budget_max": 7000,
+      "invalid_actions": 0
+    }
+  ]
+}
