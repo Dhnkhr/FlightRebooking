@@ -195,3 +195,8 @@ def delete_session(session_id: str) -> Dict[str, Any]:
     _get_session(session_id)
     del _SESSIONS[session_id]
     return {"deleted": session_id}
+
+
+def start():
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=7860)
