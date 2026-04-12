@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flight Rebooking Control Tower</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700;800&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/ui/static/style.css" />
+  </head>
+  <body>
+    <div class="shape shape-a" aria-hidden="true"></div>
+    <div class="shape shape-b" aria-hidden="true"></div>
+    <div class="shape shape-c" aria-hidden="true"></div>
+
+    <header class="hero">
+      <div class="hero-title-wrap">
+        <p class="eyebrow">Operations Console</p>
+        <h1>Flight Rebooking Control Tower</h1>
+        <p class="subtitle">
+          Run realistic disruption scenarios, inspect passenger queues, and steer the agent
+          action-by-action with live rewards.
+        </p>
+      </div>
+      <div class="hero-badges">
+        <span id="sessionBadge" class="badge">Session: -</span>
+        <span id="phaseBadge" class="badge badge-accent">State: idle</span>
+        <span id="scoreBadge" class="badge badge-score">Grade: -</span>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="panel mission">
+        <h2>Mission Setup</h2>
+        <label for="taskSelect">Task</label>
+        <select id="taskSelect"></select>
+
+        <div class="button-row">
+          <button id="resetBtn" class="btn btn-primary">Reset Session</button>
+          <button id="autoBtn" class="btn btn-secondary">Auto Step</button>
+          <button id="finalizeBtn" class="btn btn-danger">Finalize</button>
+        </div>
+
+        <div id="taskMeta" class="task-meta"></div>
+
+        <div class="metrics">
+          <article class="metric">
+            <p class="metric-label">Budget Remaining</p>
+            <p id="budgetRemaining" class="metric-value">-</p>
+          </article>
+          <article class="metric">
+            <p class="metric-label">Budget Spent</p>
+            <p id="budgetSpent" class="metric-value">-</p>
+          </article>
+          <article class="metric">
+            <p class="metric-label">Progress</p>
+            <p id="progressValue" class="metric-value">-</p>
+          </article>
+          <article class="metric">
+            <p class="metric-label">Invalid Actions</p>
+            <p id="invalidValue" class="metric-value">-</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel observation">
+        <div class="panel-head">
+          <h2>Live Observation</h2>
+          <span id="stepCountBadge" class="chip">step 0</span>
+        </div>
+
+        <div class="split">
+          <section class="observation-group observation-passengers">
+            <div class="group-head">
+              <h3><span class="group-dot" aria-hidden="true"></span>Pending Passengers</h3>
+              <span class="group-tag">Queue</span>
+            </div>
+            <div id="pendingList" class="scroll-list list-passengers"></div>
+          </section>
+          <section class="observation-group observation-flights">
+            <div class="group-head">
+              <h3><span class="group-dot" aria-hidden="true"></span>Available Flights</h3>
+              <span class="group-tag">Inventory</span>
+            </div>
+            <div id="flightsList" class="scroll-list list-flights"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="panel action-console">
+        <h2>Action Console</h2>
+        <form id="actionForm">
+          <label for="actionType">Action Type</label>
+          <select id="actionType">
+            <option value="rebook_passenger">rebook_passenger</option>
+            <option value="offer_downgrade">offer_downgrade</option>
+            <option value="book_hotel">book_hotel</option>
+            <option value="rebook_on_partner">rebook_on_partner</option>
+            <option value="mark_no_solution">mark_no_solution</option>
+            <option value="finalize">finalize</option>
+          </select>
+
+          <label for="passengerId">Passenger</label>
+          <select id="passengerId"></select>
+
+          <label for="flightId">Flight</label>
+          <select id="flightId"></select>
+
+          <div class="button-row stacked">
+            <button id="suggestBtn" type="button" class="btn btn-ghost">Use Suggestion</button>
+            <button id="runStepBtn" type="submit" class="btn btn-primary">Run Step</button>
+          </div>
+        </form>
+
+        <section class="result-box">
+          <div class="result-head">
+            <h3>Latest Step</h3>
+            <button id="toggleRawBtn" type="button" class="btn btn-ghost compact">Show Raw JSON</button>
+          </div>
+          <div id="latestResult" class="latest-summary">No actions yet.</div>
+          <pre id="latestRaw" class="latest-raw hidden"></pre>
+        </section>
+      </section>
+    </main>
+
+    <section class="panel timeline">
+      <div class="panel-head">
+        <h2>Trajectory Log</h2>
+        <button id="clearLogBtn" class="btn btn-ghost compact">Clear</button>
+      </div>
+      <div id="logList" class="log-list"></div>
+    </section>
+
+    <script src="/ui/static/app.js"></script>
+  </body>
+</html>

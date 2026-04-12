@@ -1,0 +1,23 @@
+{
+  "policy_requested": "openai_trained",
+  "policy_effective": "openai_trained",
+  "seed": 42,
+  "api_base_url": "https://api.groq.com/openai/v1",
+  "model_name": "llama-3.1-8b-instant",
+  "ml_policy_path": "d:/meta/flight-rebooking-agent/artifacts/ml_policy.pkl",
+  "ml_policy_loaded": true,
+  "overall_score": 1.0,
+  "tasks": [
+    {
+      "task": "easy",
+      "task_id": "easy_minor_disruption",
+      "difficulty": "easy",
+      "steps": 3,
+      "avg_step_reward": 0.9,
+      "score": 1.0,
+      "budget_spent": 0.0,
+      "budget_max": 3000,
+      "invalid_actions": 0
+    }
+  ]
+}
