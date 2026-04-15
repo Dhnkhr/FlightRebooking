@@ -22,7 +22,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 
-from environment import Action, ActionType, FlightRebookingEnv
+from environment import Action, ActionType, CabinClass, FlightRebookingEnv
 from ml_policy import ACTION_TYPE_ORDER, choose_action_from_ranked_types, heuristic_action, observation_to_features
 from tasks import TASKS, grade_task
 
@@ -66,7 +66,312 @@ def _jitter_task(task_data: Dict[str, Any], rng: random.Random) -> Dict[str, Any
     return variant
 
 
-def _rollout_expert_episode(task_data: Dict[str, Any], task_key: str, episode_index: int) -> Tuple[List[Dict[str, Any]], EpisodeSummary]:
+def _tier_weight(tier: str) -> int:
+    return {
+        "Platinum": 4,
+        "Gold": 3,
+        "Silver": 2,
+        "Standard": 1,
+    }.get(tier, 1)
+
+
+def _has_seat(flight: Dict[str, Any], cabin_class: str) -> bool:
+    if cabin_class == CabinClass.BUSINESS.value:
+        return int(flight.get("business_seats", 0)) > 0
+    return int(flight.get("economy_seats", 0)) > 0
+
+
+def _feasible_actions_from_observation(observation: Dict[str, Any]) -> List[Action]:
+    pending = list(observation.get("pending_passengers", []))
+    flights = sorted(
+        list(observation.get("available_flights", [])),
+        key=lambda flight: float(flight.get("departure_hrs", 999.0)),
+    )
+    budget_remaining = float(observation.get("budget_remaining", 0.0))
+
+    if not pending:
+        return [Action(action_type=ActionType.FINALIZE)]
+
+    actions: List[Action] = []
+    for passenger in pending:
+        passenger_id = str(passenger.get("id", ""))
+        passenger_cabin = str(passenger.get("cabin_class", ""))
+
+        for flight in flights:
+            flight_id = str(flight.get("id", ""))
+
+            if (not flight.get("is_partner", False)) and _has_seat(flight, passenger_cabin):
+                actions.append(
+                    Action(
+                        action_type=ActionType.REBOOK_PASSENGER,
+                        passenger_id=passenger_id,
+                        flight_id=flight_id,
+                    )
+                )
+
+            if (
+                passenger_cabin == CabinClass.BUSINESS.value
+                and (not flight.get("is_partner", False))
+                and int(flight.get("economy_seats", 0)) > 0
+                and budget_remaining >= 500.0
+            ):
+                actions.append(
+                    Action(
+                        action_type=ActionType.OFFER_DOWNGRADE,
+                        passenger_id=passenger_id,
+                        flight_id=flight_id,
+                    )
+                )
+
+            if (
+                flight.get("is_partner", False)
+                and _has_seat(flight, passenger_cabin)
+                and budget_remaining >= 800.0
+            ):
+                actions.append(
+                    Action(
+                        action_type=ActionType.REBOOK_ON_PARTNER,
+                        passenger_id=passenger_id,
+                        flight_id=flight_id,
+                    )
+                )
+
+        if budget_remaining >= 250.0:
+            actions.append(
+                Action(
+                    action_type=ActionType.BOOK_HOTEL,
+                    passenger_id=passenger_id,
+                )
+            )
+
+        actions.append(
+            Action(
+                action_type=ActionType.MARK_NO_SOLUTION,
+                passenger_id=passenger_id,
+            )
+        )
+
+    actions.append(Action(action_type=ActionType.FINALIZE))
+    return actions
+
+
+def _action_cost(action_type: ActionType) -> float:
+    return {
+        ActionType.REBOOK_PASSENGER: 0.0,
+        ActionType.OFFER_DOWNGRADE: 500.0,
+        ActionType.BOOK_HOTEL: 250.0,
+        ActionType.REBOOK_ON_PARTNER: 800.0,
+        ActionType.MARK_NO_SOLUTION: 0.0,
+        ActionType.FINALIZE: 0.0,
+    }[action_type]
+
+
+def _action_priority_score(observation: Dict[str, Any], action: Action) -> float:
+    pending = list(observation.get("pending_passengers", []))
+    if action.action_type == ActionType.FINALIZE:
+        return 10.0 if not pending else -10.0
+
+    pending_by_id = {p["id"]: p for p in pending}
+    flights_by_id = {f["id"]: f for f in observation.get("available_flights", [])}
+
+    passenger = pending_by_id.get(action.passenger_id or "")
+    if passenger is None:
+        return -100.0
+
+    tier_component = _tier_weight(str(passenger.get("priority_tier", ""))) / 4.0
+    deadline = passenger.get("connection_deadline_hrs")
+    if deadline is None:
+        deadline_component = 0.0
+    else:
+        deadline_component = (12.0 - min(max(float(deadline), 0.0), 12.0)) / 12.0
+
+    score = (0.65 * tier_component) + (0.35 * deadline_component)
+
+    score += {
+        ActionType.REBOOK_PASSENGER: 0.60,
+        ActionType.OFFER_DOWNGRADE: 0.30,
+        ActionType.REBOOK_ON_PARTNER: 0.18,
+        ActionType.BOOK_HOTEL: 0.10,
+        ActionType.MARK_NO_SOLUTION: -0.60,
+        ActionType.FINALIZE: 0.0,
+    }[action.action_type]
+
+    if action.flight_id:
+        flight = flights_by_id.get(action.flight_id)
+        if flight is not None and deadline is not None:
+            departure = float(flight.get("departure_hrs", 99.0))
+            if departure <= float(deadline):
+                score += 0.22
+            else:
+                score -= 0.22
+
+    budget_remaining = float(observation.get("budget_remaining", 0.0))
+    budget_spent = float(observation.get("budget_spent", 0.0))
+    budget_total = max(budget_remaining + budget_spent, 1.0)
+    score -= 0.35 * min(_action_cost(action.action_type) / budget_total, 1.0)
+
+    return score
+
+
+def _prune_candidate_actions(observation: Dict[str, Any], actions: List[Action], max_candidates: int) -> List[Action]:
+    deduped: List[Action] = []
+    seen = set()
+    for action in actions:
+        signature = (action.action_type.value, action.passenger_id, action.flight_id)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deduped.append(action)
+
+    deduped.sort(key=lambda action: -_action_priority_score(observation, action))
+    return deduped[: max(1, max_candidates)]
+
+
+def _rollout_heuristic_to_end(env: FlightRebookingEnv) -> None:
+    done = False
+    while not done:
+        observation = env._get_observation().model_dump(mode="json")
+        action = Action(**heuristic_action(observation))
+        _, _, done, _ = env.step(action)
+
+
+def _evaluate_state_with_lookahead(
+    env: FlightRebookingEnv,
+    task_key: str,
+    max_budget: float,
+    lookahead_depth: int,
+    lookahead_width: int,
+) -> float:
+    observation = env._get_observation().model_dump(mode="json")
+    candidate_actions = _prune_candidate_actions(
+        observation=observation,
+        actions=_feasible_actions_from_observation(observation),
+        max_candidates=lookahead_width,
+    )
+
+    best_score = -1.0
+    for action in candidate_actions:
+        env_copy = copy.deepcopy(env)
+        _, _, done, _ = env_copy.step(action)
+
+        if done:
+            score = float(grade_task(task_key, env_copy.state(), max_budget))
+        elif lookahead_depth <= 1:
+            _rollout_heuristic_to_end(env_copy)
+            score = float(grade_task(task_key, env_copy.state(), max_budget))
+        else:
+            score = _evaluate_state_with_lookahead(
+                env=env_copy,
+                task_key=task_key,
+                max_budget=max_budget,
+                lookahead_depth=lookahead_depth - 1,
+                lookahead_width=lookahead_width,
+            )
+
+        if score > best_score:
+            best_score = score
+
+    if best_score >= 0.0:
+        return best_score
+
+    env_fallback = copy.deepcopy(env)
+    _rollout_heuristic_to_end(env_fallback)
+    return float(grade_task(task_key, env_fallback.state(), max_budget))
+
+
+def _projected_score_for_action(
+    env: FlightRebookingEnv,
+    task_key: str,
+    max_budget: float,
+    action: Action,
+    lookahead_depth: int,
+    lookahead_width: int,
+) -> float:
+    env_copy = copy.deepcopy(env)
+    _, _, done, _ = env_copy.step(action)
+    if done:
+        return float(grade_task(task_key, env_copy.state(), max_budget))
+
+    if lookahead_depth <= 1:
+        _rollout_heuristic_to_end(env_copy)
+        return float(grade_task(task_key, env_copy.state(), max_budget))
+
+    return _evaluate_state_with_lookahead(
+        env=env_copy,
+        task_key=task_key,
+        max_budget=max_budget,
+        lookahead_depth=lookahead_depth - 1,
+        lookahead_width=lookahead_width,
+    )
+
+
+def _choose_lookahead_teacher_action(
+    env: FlightRebookingEnv,
+    task_key: str,
+    max_budget: float,
+    lookahead_depth: int,
+    lookahead_width: int,
+) -> Dict[str, Any]:
+    observation = env._get_observation().model_dump(mode="json")
+    candidate_actions = _prune_candidate_actions(
+        observation=observation,
+        actions=_feasible_actions_from_observation(observation),
+        max_candidates=lookahead_width,
+    )
+
+    best_action = candidate_actions[0]
+    best_score = -1.0
+    for action in candidate_actions:
+        try:
+            projected_score = _projected_score_for_action(
+                env=env,
+                task_key=task_key,
+                max_budget=max_budget,
+                action=action,
+                lookahead_depth=lookahead_depth,
+                lookahead_width=lookahead_width,
+            )
+        except Exception:
+            continue
+        if projected_score > best_score:
+            best_score = projected_score
+            best_action = action
+
+    return best_action.model_dump(mode="json")
+
+
+def _choose_teacher_action(
+    env: FlightRebookingEnv,
+    task_key: str,
+    max_budget: float,
+    observation_dict: Dict[str, Any],
+    teacher_policy: str,
+    teacher_lookahead_depth: int,
+    teacher_lookahead_width: int,
+) -> Dict[str, Any]:
+    if teacher_policy == "heuristic":
+        return heuristic_action(observation_dict)
+
+    try:
+        return _choose_lookahead_teacher_action(
+            env=env,
+            task_key=task_key,
+            max_budget=max_budget,
+            lookahead_depth=teacher_lookahead_depth,
+            lookahead_width=teacher_lookahead_width,
+        )
+    except Exception:
+        return heuristic_action(observation_dict)
+
+
+def _rollout_expert_episode(
+    task_data: Dict[str, Any],
+    task_key: str,
+    episode_index: int,
+    teacher_policy: str,
+    teacher_lookahead_depth: int,
+    teacher_lookahead_width: int,
+) -> Tuple[List[Dict[str, Any]], EpisodeSummary]:
     env = FlightRebookingEnv(task_data=task_data)
     observation = env.reset()
     done = False
@@ -74,7 +379,15 @@ def _rollout_expert_episode(task_data: Dict[str, Any], task_key: str, episode_in
     samples: List[Dict[str, Any]] = []
     while not done:
         observation_dict = observation.model_dump(mode="json")
-        action_payload = heuristic_action(observation_dict)
+        action_payload = _choose_teacher_action(
+            env=env,
+            task_key=task_key,
+            max_budget=float(task_data["max_budget"]),
+            observation_dict=observation_dict,
+            teacher_policy=teacher_policy,
+            teacher_lookahead_depth=teacher_lookahead_depth,
+            teacher_lookahead_width=teacher_lookahead_width,
+        )
 
         samples.append(
             {
@@ -97,7 +410,13 @@ def _rollout_expert_episode(task_data: Dict[str, Any], task_key: str, episode_in
     return samples, summary
 
 
-def _collect_dataset(seed: int, episodes_per_task: int) -> Tuple[List[List[float]], List[str], List[EpisodeSummary]]:
+def _collect_dataset(
+    seed: int,
+    episodes_per_task: int,
+    teacher_policy: str,
+    teacher_lookahead_depth: int,
+    teacher_lookahead_width: int,
+) -> Tuple[List[List[float]], List[str], List[EpisodeSummary]]:
     rng = random.Random(seed)
     X: List[List[float]] = []
     y: List[str] = []
@@ -106,7 +425,14 @@ def _collect_dataset(seed: int, episodes_per_task: int) -> Tuple[List[List[float
     for task_key, task_data in TASKS.items():
         for episode_idx in range(episodes_per_task):
             variant = _jitter_task(task_data, rng)
-            samples, summary = _rollout_expert_episode(variant, task_key, episode_idx)
+            samples, summary = _rollout_expert_episode(
+                task_data=variant,
+                task_key=task_key,
+                episode_index=episode_idx,
+                teacher_policy=teacher_policy,
+                teacher_lookahead_depth=teacher_lookahead_depth,
+                teacher_lookahead_width=teacher_lookahead_width,
+            )
             summaries.append(summary)
             for sample in samples:
                 X.append(sample["features"])
@@ -161,6 +487,24 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train ML policy for flight rebooking.")
     parser.add_argument("--episodes-per-task", type=int, default=450, help="Synthetic expert episodes generated per task.")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--teacher-policy",
+        choices=["heuristic", "lookahead"],
+        default="lookahead",
+        help="Expert policy used to label the training dataset.",
+    )
+    parser.add_argument(
+        "--teacher-lookahead-depth",
+        type=int,
+        default=2,
+        help="Lookahead depth used when --teacher-policy lookahead is enabled.",
+    )
+    parser.add_argument(
+        "--teacher-lookahead-width",
+        type=int,
+        default=8,
+        help="Candidate branching width used when --teacher-policy lookahead is enabled.",
+    )
     parser.add_argument("--output", default="artifacts/ml_policy.pkl", help="Path to save trained policy artifact.")
     parser.add_argument("--report", default="artifacts/ml_policy_report.json", help="Path to save training/eval report.")
     return parser.parse_args()
@@ -168,12 +512,24 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.teacher_lookahead_depth = max(1, int(args.teacher_lookahead_depth))
+    args.teacher_lookahead_width = max(1, int(args.teacher_lookahead_width))
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     os.makedirs(os.path.dirname(args.report) or ".", exist_ok=True)
 
-    print("[TRAIN] Collecting synthetic expert dataset...")
-    X, y, episode_summaries = _collect_dataset(seed=args.seed, episodes_per_task=args.episodes_per_task)
+    print(
+        "[TRAIN] Collecting synthetic expert dataset... "
+        f"teacher={args.teacher_policy} "
+        f"depth={args.teacher_lookahead_depth} width={args.teacher_lookahead_width}"
+    )
+    X, y, episode_summaries = _collect_dataset(
+        seed=args.seed,
+        episodes_per_task=args.episodes_per_task,
+        teacher_policy=args.teacher_policy,
+        teacher_lookahead_depth=args.teacher_lookahead_depth,
+        teacher_lookahead_width=args.teacher_lookahead_width,
+    )
 
     if not X:
         raise SystemExit("No training data generated.")
@@ -217,13 +573,16 @@ def main() -> None:
         task_episode_means[task_key] = round(mean(task_scores), 4)
 
     artifact = {
-        "artifact_version": "1.0",
+        "artifact_version": "1.1",
         "seed": args.seed,
         "feature_length": feature_length,
         "action_type_order": ACTION_TYPE_ORDER,
         "model": model,
         "training_metadata": {
             "episodes_per_task": args.episodes_per_task,
+            "teacher_policy": args.teacher_policy,
+            "teacher_lookahead_depth": args.teacher_lookahead_depth,
+            "teacher_lookahead_width": args.teacher_lookahead_width,
             "sample_count": len(X),
             "task_episode_mean_scores": task_episode_means,
             "train_accuracy": round(train_acc, 6),
@@ -241,6 +600,9 @@ def main() -> None:
             "samples": len(X),
             "feature_length": feature_length,
             "episodes_per_task": args.episodes_per_task,
+            "teacher_policy": args.teacher_policy,
+            "teacher_lookahead_depth": args.teacher_lookahead_depth,
+            "teacher_lookahead_width": args.teacher_lookahead_width,
             "task_episode_mean_scores": task_episode_means,
         },
         "metrics": {

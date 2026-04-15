@@ -32,6 +32,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--episodes-per-task", type=int, default=450)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--task", choices=["all", "easy", "medium", "hard"], default="all")
+    parser.add_argument("--teacher-policy", choices=["heuristic", "lookahead"], default="lookahead")
+    parser.add_argument("--teacher-lookahead-depth", type=int, default=2)
+    parser.add_argument("--teacher-lookahead-width", type=int, default=8)
     parser.add_argument("--skip-train", action="store_true", help="Skip training and reuse existing ML artifact.")
     parser.add_argument("--train-only", action="store_true", help="Train artifact only; do not run inference.")
     parser.add_argument("--ml-policy-path", default="artifacts/ml_policy.pkl")
@@ -42,6 +45,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.teacher_lookahead_depth = max(1, int(args.teacher_lookahead_depth))
+    args.teacher_lookahead_width = max(1, int(args.teacher_lookahead_width))
 
     os.makedirs(os.path.dirname(args.ml_policy_path) or ".", exist_ok=True)
     os.makedirs(os.path.dirname(args.training_report) or ".", exist_ok=True)
@@ -55,6 +60,12 @@ def main() -> None:
             str(args.episodes_per_task),
             "--seed",
             str(args.seed),
+            "--teacher-policy",
+            args.teacher_policy,
+            "--teacher-lookahead-depth",
+            str(args.teacher_lookahead_depth),
+            "--teacher-lookahead-width",
+            str(args.teacher_lookahead_width),
             "--output",
             args.ml_policy_path,
             "--report",

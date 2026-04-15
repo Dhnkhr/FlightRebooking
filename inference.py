@@ -47,6 +47,7 @@ DEFAULT_LLM_MODEL = "llama-3.1-8b-instant"
 INTERNAL_GROQ_API_KEY = ""
 BENCHMARK_NAME = os.getenv("BENCHMARK", "flight-rebooking-openenv")
 SUCCESS_SCORE_THRESHOLD = 0.1
+GIT_LFS_POINTER_HEADER = "version https://git-lfs.github.com/spec/v1"
 
 
 def _first_non_empty(*values: str) -> str:
@@ -101,6 +102,58 @@ def _load_ml_policy_artifact(path: str) -> Optional[Dict[str, Any]]:
     if not isinstance(artifact, dict) or "model" not in artifact:
         print(f"[WARN] Invalid ML policy artifact format at {path}; ignoring.", file=sys.stderr)
         return None
+
+    return artifact
+
+
+def _is_git_lfs_pointer_file(path: str) -> bool:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            lines = [handle.readline().strip() for _ in range(3)]
+    except (UnicodeDecodeError, OSError):
+        return False
+
+    if not lines or lines[0] != GIT_LFS_POINTER_HEADER:
+        return False
+
+    return any(line.startswith("oid sha256:") for line in lines[1:])
+
+
+def _ml_policy_fix_instructions(path: str) -> str:
+    return (
+        "Fix options:\n"
+        "1) Materialize artifact bytes with Git LFS (if this repo stores models in LFS):\n"
+        f"   git lfs pull --include \"{path}\"\n"
+        "2) Regenerate the artifact locally:\n"
+        "   python train_ml_policy.py --episodes-per-task 450 --seed 42 --output artifacts/ml_policy.pkl --report artifacts/ml_policy_report.json"
+    )
+
+
+def _require_ml_policy_artifact(path: str, policy_name: str) -> Dict[str, Any]:
+    if not path:
+        raise SystemExit(
+            f"Policy '{policy_name}' requires --ml-policy-path.\n"
+            + _ml_policy_fix_instructions("artifacts/ml_policy.pkl")
+        )
+
+    if not os.path.exists(path):
+        raise SystemExit(
+            f"Policy '{policy_name}' requires an ML artifact, but '{path}' was not found.\n"
+            + _ml_policy_fix_instructions(path)
+        )
+
+    if _is_git_lfs_pointer_file(path):
+        raise SystemExit(
+            f"Policy '{policy_name}' cannot run because '{path}' is a Git LFS pointer, not a pickle artifact.\n"
+            + _ml_policy_fix_instructions(path)
+        )
+
+    artifact = _load_ml_policy_artifact(path)
+    if artifact is None:
+        raise SystemExit(
+            f"Policy '{policy_name}' requires a valid ML artifact, but '{path}' could not be loaded as a pickle.\n"
+            + _ml_policy_fix_instructions(path)
+        )
 
     return artifact
 
@@ -778,22 +831,10 @@ def main() -> None:
 
     task_keys = ["easy", "medium", "hard"] if args.task == "all" else [args.task]
 
-    ml_policy_artifact = _load_ml_policy_artifact(args.ml_policy_path)
     effective_policy = args.policy
-
-    if effective_policy == "trained_ml" and ml_policy_artifact is None:
-        print(
-            f"[WARN] trained_ml requested but artifact not found at {args.ml_policy_path}; using heuristic.",
-            file=sys.stderr,
-        )
-        effective_policy = "heuristic"
-
-    if effective_policy == "openai_trained" and ml_policy_artifact is None:
-        print(
-            f"[WARN] openai_trained requested but artifact not found at {args.ml_policy_path}; using openai.",
-            file=sys.stderr,
-        )
-        effective_policy = "openai"
+    ml_policy_artifact: Optional[Dict[str, Any]] = None
+    if effective_policy in {"trained_ml", "openai_trained"}:
+        ml_policy_artifact = _require_ml_policy_artifact(args.ml_policy_path, effective_policy)
 
     api_base_url = "heuristic"
     model_name = "heuristic"

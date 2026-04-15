@@ -197,15 +197,17 @@ python inference.py --policy heuristic --seed 42 --task all
 Train a reusable policy artifact from large synthetic trajectories:
 
 ```bash
-python train_ml_policy.py --episodes-per-task 450 --seed 42 --output artifacts/ml_policy.pkl --report artifacts/ml_policy_report.json
+python train_ml_policy.py --episodes-per-task 450 --seed 42 --teacher-policy lookahead --teacher-lookahead-depth 2 --teacher-lookahead-width 8 --output artifacts/ml_policy.pkl --report artifacts/ml_policy_report.json
 ```
 
 The report JSON includes validation accuracy and canonical task scores for the learned policy.
 
+For `trained_ml` and `openai_trained` inference modes, `inference.py` now fails fast if the artifact path is missing, invalid, or still a Git LFS pointer file.
+
 One-command autopilot (train + run hybrid inference):
 
 ```bash
-python autopilot.py --episodes-per-task 450 --seed 42 --task all
+python autopilot.py --episodes-per-task 450 --seed 42 --teacher-policy lookahead --teacher-lookahead-depth 2 --teacher-lookahead-width 8 --task all
 ```
 
 ## Baseline Scores
