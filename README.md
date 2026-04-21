@@ -111,7 +111,7 @@ Features:
 
 - OpenAI API client integration
 - internal Groq defaults (`https://api.groq.com/openai/v1`, `llama-3.1-8b-instant`) for zero-setup runs
-- optional env var overrides via `API_BASE_URL`, `MODEL_NAME`, `HF_TOKEN`/`OPENAI_API_KEY`/`GROQ_API_KEY`
+- optional env var overrides via `API_BASE_URL`, `MODEL_NAME`, `GROQ_API_KEY`/`HF_TOKEN`/`OPENAI_API_KEY`
 - optional trained ML policy artifact (`artifacts/ml_policy.pkl`) for guided and standalone policy execution
 - deterministic settings (`temperature=0`, fixed `seed`)
 - evaluates all 3 tasks and prints normalized scores
@@ -192,7 +192,7 @@ Deterministic offline fallback:
 python inference.py --policy heuristic --seed 42 --task all
 ```
 
-## ML Training Pipeline
+## ML Training Pipeline (Round 1)
 
 Train a reusable policy artifact from large synthetic trajectories:
 
@@ -203,6 +203,22 @@ python train_ml_policy.py --episodes-per-task 450 --seed 42 --teacher-policy loo
 The report JSON includes validation accuracy and canonical task scores for the learned policy.
 
 For `trained_ml` and `openai_trained` inference modes, `inference.py` now fails fast if the artifact path is missing, invalid, or still a Git LFS pointer file.
+
+## LLM Fine-Tuning Pipeline (Round 2)
+
+For Round 2, you can train a local Open-Source LLM (like Meta Llama 3) to execute the simulation using Supervised Fine-Tuning (SFT) with HuggingFace TRL or Unsloth in Google Colab.
+
+First, generate the ShareGPT structured JSONL dataset:
+
+```bash
+python generate_llm_dataset.py --episodes-per-task 50 --seed 42 --lookahead-depth 2 --lookahead-width 8 --output artifacts/flight_rebooking_sft.jsonl
+```
+
+Then, follow these steps to train:
+1. Open Google Colab and upload `artifacts/flight_rebooking_sft.jsonl`.
+2. Upload and open the provided Jupyter Notebook: `train_unsloth.ipynb`.
+3. Run the notebook to install Unsloth and TRL, and train the Llama 3 8B model using LoRA.
+4. The notebook integrates with **Weights & Biases (WandB)** so you can easily show training progress and reward/loss curves during your pitch.
 
 One-command autopilot (train + run hybrid inference):
 

@@ -70,14 +70,16 @@ def _resolve_model_config() -> Dict[str, str]:
         DEFAULT_LLM_MODEL,
     )
     api_key = _first_non_empty(
+        os.getenv("GROQ_API_KEY", ""),
         os.getenv("HF_TOKEN", ""),
         os.getenv("OPENAI_API_KEY", ""),
-        os.getenv("GROQ_API_KEY", ""),
         INTERNAL_GROQ_API_KEY,
     )
 
     if not api_key:
-        raise SystemExit("No API key configured for openai policy.")
+        raise SystemExit(
+            "No API key configured. Set GROQ_API_KEY (preferred), OPENAI_API_KEY, or HF_TOKEN."
+        )
 
     return {
         "api_base_url": api_base_url,

@@ -327,8 +327,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default=_first_non_empty(
-            os.getenv("OPENAI_MODEL", ""),
             os.getenv("MODEL_NAME", ""),
+            os.getenv("OPENAI_MODEL", ""),
             DEFAULT_OPEN_SOURCE_MODEL,
         ),
         help="Model name for --policy openai.",
@@ -360,14 +360,14 @@ def main() -> None:
     client: Optional[OpenAI] = None
     if args.policy == "openai":
         api_key = _first_non_empty(
+            os.getenv("GROQ_API_KEY", ""),
             os.getenv("OPENAI_API_KEY", ""),
             os.getenv("HF_TOKEN", ""),
-            os.getenv("GROQ_API_KEY", ""),
             INTERNAL_GROQ_API_KEY,
         )
         if not api_key:
             raise SystemExit(
-                "OPENAI_API_KEY is not set. Set it in your environment or use --policy heuristic."
+                "No API key configured. Set GROQ_API_KEY (preferred), OPENAI_API_KEY, or HF_TOKEN, or use --policy heuristic."
             )
 
         base_url = _first_non_empty(

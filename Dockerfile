@@ -23,9 +23,8 @@ COPY inference.py /app/inference.py
 COPY baseline.py /app/baseline.py
 COPY ml_policy.py /app/ml_policy.py
 
-# Keep lightweight report + current runtime ML artifact.
-COPY artifacts/ml_policy.pkl /app/artifacts/ml_policy.pkl
-COPY artifacts/ml_policy_report.json /app/artifacts/ml_policy_report.json
+# Artifacts directory (training data kept for reference).
+RUN mkdir -p /app/artifacts
 
 EXPOSE 7860
 
