@@ -1,6 +1,8 @@
 import json
 import torch
-from unsloth import FastLanguageModel
+import os
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from peft import PeftModel
 from environment import FlightRebookingEnv, Action, ActionType
 from tasks import TASKS, grade_task
 
@@ -51,7 +53,8 @@ Policy:
             return_tensors="pt"
         ).to("cuda")
         
-        outputs = model.generate(inputs, max_new_tokens=64, use_cache=True, do_sample=False)
+        with torch.no_grad():
+            outputs = model.generate(inputs, max_new_tokens=64, use_cache=True, do_sample=False)
         response_text = tokenizer.decode(outputs[0][inputs.shape[1]:], skip_special_tokens=True)
         
         action_dict = extract_json(response_text)
@@ -78,19 +81,35 @@ Policy:
     return float(score)
 
 def main():
-    print("Loading specialized flight-rebooking-lora model from local folder...")
-    try:
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name = "/content/drive/MyDrive/flight-rebooking-lora", # Loads your saved weights!
-            max_seq_length = 1024,
-            dtype = None,
-            load_in_4bit = True,
-        )
-    except Exception as e:
-        print(f"ERROR: Could not load the model. Are you sure 'flight-rebooking-lora' folder is here? {e}")
-        return
+    base_model_name = "unsloth/llama-3-8b-Instruct-bnb-4bit"
+    adapter_path = "./flight-rebooking-lora" # Folder containing your downloaded adapter files
+    
+    print(f"Loading base model: {base_model_name}")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype=torch.float16,
+    )
 
-    FastLanguageModel.for_inference(model) # Enable native 2x faster inference
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model_name,
+            quantization_config=bnb_config,
+            device_map={"": 0}
+        )
+        
+        if os.path.exists(adapter_path):
+            print(f"Loading LoRA adapters from: {adapter_path}")
+            model = PeftModel.from_pretrained(model, adapter_path)
+        else:
+            print(f"WARNING: Adapter path {adapter_path} not found. Running base model only.")
+            
+        model.eval()
+    except Exception as e:
+        print(f"ERROR: Could not load the model: {e}")
+        return
     
     total_score = 0
     scores = {}
