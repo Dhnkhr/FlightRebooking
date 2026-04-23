@@ -1,32 +1,33 @@
 FROM python:3.10-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-ENV PIP_NO_CACHE_DIR=1
+# Install system dependencies for bitsandbytes
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Runtime-only dependencies for serving the environment/API.
-COPY requirements.runtime.txt /app/requirements.runtime.txt
-RUN pip install --no-cache-dir -r /app/requirements.runtime.txt
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Copy only runtime files required by the Space/API app.
-COPY app.py /app/app.py
-COPY environment.py /app/environment.py
-COPY tasks.py /app/tasks.py
-COPY openenv.yaml /app/openenv.yaml
-COPY frontend /app/frontend
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Keep inference modules available in container for optional local checks.
-COPY inference.py /app/inference.py
-COPY baseline.py /app/baseline.py
-COPY ml_policy.py /app/ml_policy.py
+# Copy project files
+COPY app.py .
+COPY environment.py .
+COPY tasks.py .
+COPY openenv.yaml .
+COPY frontend/ ./frontend/
+COPY flight-rebooking-lora/ ./flight-rebooking-lora/
 
-# Artifacts directory (training data kept for reference).
-RUN mkdir -p /app/artifacts
+# Create a place for HF cache
+RUN mkdir -p /app/.cache && chmod 777 /app/.cache
+ENV HF_HOME=/app/.cache
 
 EXPOSE 7860
 
-# Hugging Face Spaces (Docker SDK) listens on port 7860.
+# Start the application
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
