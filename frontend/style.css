@@ -609,6 +609,69 @@ pre {
   margin-top: 0.2rem;
 }
 
+/* Trajectory log entries */
+.log-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.52rem 0.72rem;
+  border-radius: 0.6rem;
+  border: 1px solid rgba(163, 220, 205, 0.18);
+  background: rgba(7, 23, 27, 0.85);
+  font-size: 0.84rem;
+  animation: reveal-up 200ms ease-out both;
+}
+
+.log-step {
+  color: var(--muted);
+  font-size: 0.75rem;
+  min-width: 2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-action {
+  flex: 1;
+  color: var(--accent-cool);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-reward {
+  font-weight: 700;
+  font-size: 0.78rem;
+  padding: 0.18rem 0.42rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.log-reward-high {
+  color: #b4fde6;
+  background: rgba(20, 100, 70, 0.4);
+  border: 1px solid rgba(44, 224, 160, 0.4);
+}
+
+.log-reward-mid {
+  color: #ffe8a3;
+  background: rgba(100, 80, 10, 0.38);
+  border: 1px solid rgba(245, 200, 91, 0.4);
+}
+
+.log-reward-low {
+  color: #ffc4c4;
+  background: rgba(100, 20, 20, 0.38);
+  border: 1px solid rgba(255, 100, 100, 0.4);
+}
+
+.log-empty {
+  color: var(--muted);
+  font-size: 0.84rem;
+  padding: 0.6rem 0.2rem;
+  text-align: center;
+}
+
+
+
 .empty {
   border: 1px dashed rgba(173, 223, 210, 0.33);
   border-radius: 0.72rem;
