@@ -6,7 +6,8 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
+
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -181,8 +182,13 @@ def _step_and_format(session: Dict[str, Any], action: Action) -> Dict[str, Any]:
 
     return response
 
-@app.get("/")
-def root() -> Dict[str, Any]:
+@app.get("/", include_in_schema=False)
+def root():
+    """Redirect root to the UI so HF Spaces renders the dashboard."""
+    return RedirectResponse(url="/ui")
+
+@app.get("/health")
+def health() -> Dict[str, Any]:
     ai_ready = (MODEL is not None and MODEL is not False) or (GROQ_CLIENT is not None)
     mode = "local-gpu" if (MODEL is not None and MODEL is not False) else ("groq-api" if GROQ_CLIENT else "none")
     return {
@@ -190,7 +196,6 @@ def root() -> Dict[str, Any]:
         "status": "ok",
         "model_loaded": ai_ready,
         "inference_mode": mode,
-        "message": "Use /ui for the dashboard.",
     }
 
 @app.on_event("startup")
