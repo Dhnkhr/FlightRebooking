@@ -378,25 +378,32 @@ function renderLatest() {
 }
 
 function renderLog() {
-  refs.logList.innerHTML = "";
-  if (!state.logs.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.textContent = "No step logs yet.";
-    refs.logList.appendChild(empty);
+  if (!refs.logList) return;
+  if (state.logs.length === 0) {
+    refs.logList.innerHTML = '<div class="log-empty">No steps recorded yet. Run a step or use AI Auto-Play.</div>';
     return;
   }
 
-  [...state.logs].reverse().forEach((entry) => {
-    const item = document.createElement("article");
-    item.className = "log-item";
-    item.innerHTML = `
-      <div><strong>${entry.action.action_type}</strong> | reward ${Number(entry.reward).toFixed(4)} | done ${entry.done ? "1" : "0"}</div>
-      <div class="log-meta">passenger ${entry.action.passenger_id || "na"} | flight ${entry.action.flight_id || "na"}</div>
-      <div class="log-meta">${entry.notes || ""}</div>
+  refs.logList.innerHTML = state.logs
+    .map((entry, i) => {
+      const actionType = entry.action?.action_type || "unknown";
+      const passId = entry.action?.passenger_id ? ` &rarr; ${escapeHtml(entry.action.passenger_id)}` : "";
+      const flightId = entry.action?.flight_id ? ` on ${escapeHtml(entry.action.flight_id)}` : "";
+      const rewardValue = Number(entry.reward || 0);
+      const reward = rewardValue.toFixed(4);
+      const rewardClass = rewardValue >= 0.8 ? "log-reward-high" : rewardValue >= 0.5 ? "log-reward-mid" : "log-reward-low";
+
+      return `
+      <div class="log-entry">
+        <span class="log-step">#${i + 1}</span>
+        <span class="log-action">${escapeHtml(actionType)}${passId}${flightId}</span>
+        <span class="log-reward ${rewardClass}">r=${reward}</span>
+      </div>
     `;
-    refs.logList.appendChild(item);
-  });
+    })
+    .join("");
+
+  refs.logList.scrollTop = refs.logList.scrollHeight;
 }
 
 function renderAll() {
