@@ -13,6 +13,13 @@ tags:
 
 A real-world operations environment where an agent plays the role of an airline disruption desk during storm cancellations.
 
+This repo includes:
+
+- a typed OpenEnv-compatible simulator ([environment.py](environment.py))
+- a submission-grade inference runner with strict stdout contract ([inference.py](inference.py))
+- a FastAPI + static dashboard for manual play and auto-play ([app.py](app.py), [frontend/index.html](frontend/index.html))
+- optional local LoRA adapters for GPU inference ([flight-rebooking-lora/](flight-rebooking-lora/))
+
 The agent must resolve stranded passengers under real constraints:
 
 - loyalty-tier SLAs (Platinum > Gold > Silver > Standard)
@@ -125,6 +132,14 @@ set MODEL_NAME=llama-3.1-8b-instant
 set GROQ_API_KEY=your_provider_token
 ```
 
+Mac/Linux equivalents:
+
+```bash
+export API_BASE_URL=https://api.groq.com/openai/v1
+export MODEL_NAME=llama-3.1-8b-instant
+export GROQ_API_KEY=your_provider_token
+```
+
 ## Submission Contract (Mandatory)
 
 Before submitting, define these environment variables in your runtime configuration:
@@ -206,24 +221,20 @@ For `trained_ml` and `openai_trained` inference modes, `inference.py` now fails 
 
 ## LLM Fine-Tuning Pipeline (Round 2)
 
-For Round 2, you can train a local Open-Source LLM (like Meta Llama 3) to execute the simulation using Supervised Fine-Tuning (SFT) with HuggingFace TRL or Unsloth in Google Colab.
+For Round 2, you can train an open weights LLM to emit valid `Action` JSON given an observation using Supervised Fine-Tuning (SFT) with TRL/Unsloth.
 
-First, generate the ShareGPT structured JSONL dataset:
+Generate the final ShareGPT-style JSONL dataset (the repo already contains a ready-to-use dataset under [artifacts/](artifacts/)):
 
 ```bash
-python generate_llm_dataset.py --episodes-per-task 50 --seed 42 --lookahead-depth 2 --lookahead-width 8 --output artifacts/flight_rebooking_sft.jsonl
+python generate_final_dataset.py --seed 42 --lookahead-depth 2 --lookahead-width 8 --output artifacts/flight_rebooking_sft_final.jsonl
 ```
 
-Then, follow these steps to train:
-1. Open Google Colab and upload `artifacts/flight_rebooking_sft.jsonl`.
-2. Upload and open the provided Jupyter Notebook: `train_unsloth.ipynb`.
-3. Run the notebook to install Unsloth and TRL, and train the Llama 3 8B model using LoRA.
-4. The notebook integrates with **Weights & Biases (WandB)** so you can easily show training progress and reward/loss curves during your pitch.
+The included [flight-rebooking-lora/](flight-rebooking-lora/) directory is a LoRA adapter bundle you can load for local GPU inference.
 
-One-command autopilot (train + run hybrid inference):
+Evaluate a local GPU + adapter run end-to-end:
 
 ```bash
-python autopilot.py --episodes-per-task 450 --seed 42 --teacher-policy lookahead --teacher-lookahead-depth 2 --teacher-lookahead-width 8 --task all
+python evaluate_unsloth.py
 ```
 
 ## Baseline Scores
@@ -239,11 +250,25 @@ The OpenAI baseline is reproducible given fixed model + seed + prompt, though ex
 
 ## Local Setup
 
+There are two common install modes:
+
+- Runtime-only (inference + validation; lighter dependencies):
+
+```bash
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.runtime.txt
+```
+
+- Full (UI + optional local GPU model loading; heavier deps like `torch/transformers/bitsandbytes`):
+
 ```bash
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 ```
+
+If you plan to run the FastAPI app locally, use the full install.
 
 Run the Space app locally:
 
@@ -291,7 +316,7 @@ This repo is ready for a Docker Space.
 1. Create a new Hugging Face Space with SDK set to Docker.
 2. Push this repository content.
 3. Ensure `README.md` frontmatter includes `sdk: docker` and `app_port: 7860`.
-4. Optionally add `OPENAI_API_KEY` as a Space secret for live model baselines.
+4. Optionally add `GROQ_API_KEY` as a Space secret to enable AI Auto-Play (CPU/no-GPU fallback).
 
 ## Validation
 
