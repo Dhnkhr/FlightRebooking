@@ -170,19 +170,95 @@ def run_episode(task_data: Dict[str, Any], task_key: str, lookahead_depth: int, 
     return samples
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate maximum-diversity LLM fine-tuning dataset.")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--lookahead-depth", type=int, default=2)
-    parser.add_argument("--lookahead-width", type=int, default=8)
-    parser.add_argument("--output", default="artifacts/flight_rebooking_sft_final.jsonl")
-    args = parser.parse_args()
-    
-    rng = random.Random(args.seed)
-    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    
-    dataset = []
-    
+def _run_real_flights_pipeline(
+    gen,
+    dataset: List[dict],
+    lookahead_depth: int,
+    lookahead_width: int,
+    rng: random.Random,
+) -> List[dict]:
+    """Generate comprehensive SFT data using real flights with all 5 edge-case phases."""
+    difficulties = ["easy", "medium", "hard"]
+
+    # Phase 1: Standard real-flight episodes
+    print("\n" + "=" * 60)
+    print("Phase 1: Standard real-flight episodes (300 per difficulty)")
+    print("=" * 60)
+    for difficulty in difficulties:
+        print(f"  Processing difficulty: {difficulty}")
+        for i in range(300):
+            task_data = gen.generate_task(difficulty=difficulty)
+            samples = run_episode(task_data, difficulty, lookahead_depth, lookahead_width)
+            dataset.extend(samples)
+            if (i + 1) % 100 == 0:
+                print(f"    Completed {i+1}/300 episodes... ({len(dataset)} samples so far)")
+
+    # Phase 2: Extreme-jitter real-flight episodes
+    print("\n" + "=" * 60)
+    print("Phase 2: Extreme-jitter real-flight episodes (150 per difficulty)")
+    print("=" * 60)
+    for difficulty in difficulties:
+        print(f"  Processing difficulty: {difficulty}")
+        for i in range(150):
+            base_task = gen.generate_task(difficulty=difficulty)
+            variant = _extreme_jitter_task(base_task, rng)
+            samples = run_episode(variant, difficulty, lookahead_depth, lookahead_width)
+            dataset.extend(samples)
+            if (i + 1) % 50 == 0:
+                print(f"    Completed {i+1}/150 episodes... ({len(dataset)} samples so far)")
+
+    # Phase 3: Hotel-forcing real-flight episodes
+    print("\n" + "=" * 60)
+    print("Phase 3: Hotel-forcing real-flight episodes (100 per difficulty)")
+    print("=" * 60)
+    for difficulty in difficulties:
+        print(f"  Processing difficulty: {difficulty}")
+        for i in range(100):
+            base_task = gen.generate_task(difficulty=difficulty)
+            variant = _hotel_forcing_task(base_task, rng)
+            samples = run_episode(variant, difficulty, lookahead_depth, lookahead_width)
+            dataset.extend(samples)
+            if (i + 1) % 50 == 0:
+                print(f"    Completed {i+1}/100 episodes... ({len(dataset)} samples so far)")
+
+    # Phase 4: Downgrade-forcing real-flight episodes
+    print("\n" + "=" * 60)
+    print("Phase 4: Downgrade-forcing real-flight episodes (100 per difficulty)")
+    print("=" * 60)
+    for difficulty in difficulties:
+        print(f"  Processing difficulty: {difficulty}")
+        for i in range(100):
+            base_task = gen.generate_task(difficulty=difficulty)
+            variant = _downgrade_forcing_task(base_task, rng)
+            samples = run_episode(variant, difficulty, lookahead_depth, lookahead_width)
+            dataset.extend(samples)
+            if (i + 1) % 50 == 0:
+                print(f"    Completed {i+1}/100 episodes... ({len(dataset)} samples so far)")
+
+    # Phase 5: Partner-heavy real-flight episodes
+    print("\n" + "=" * 60)
+    print("Phase 5: Partner-heavy real-flight episodes (100 per difficulty)")
+    print("=" * 60)
+    for difficulty in difficulties:
+        print(f"  Processing difficulty: {difficulty}")
+        for i in range(100):
+            base_task = gen.generate_task(difficulty=difficulty)
+            variant = _partner_heavy_task(base_task, rng)
+            samples = run_episode(variant, difficulty, lookahead_depth, lookahead_width)
+            dataset.extend(samples)
+            if (i + 1) % 50 == 0:
+                print(f"    Completed {i+1}/100 episodes... ({len(dataset)} samples so far)")
+
+    return dataset
+
+
+def _run_hardcoded_pipeline(
+    rng: random.Random,
+    dataset: List[dict],
+    lookahead_depth: int,
+    lookahead_width: int,
+) -> List[dict]:
+    """Original pipeline using hardcoded TASKS + jittering."""
     # ── Phase 1: Normal jittered episodes (broad coverage) ──
     print("=" * 60)
     print("Phase 1: Normal jittered episodes (200 per task)")
@@ -191,11 +267,11 @@ def main():
         print(f"  Processing task: {task_key}")
         for i in range(200):
             variant = _jitter_task(task_data, rng)
-            samples = run_episode(variant, task_key, args.lookahead_depth, args.lookahead_width)
+            samples = run_episode(variant, task_key, lookahead_depth, lookahead_width)
             dataset.extend(samples)
             if (i + 1) % 50 == 0:
                 print(f"    Completed {i+1}/200 episodes... ({len(dataset)} samples so far)")
-    
+
     # ── Phase 2: Extreme-jitter episodes (tight constraints) ──
     print("\n" + "=" * 60)
     print("Phase 2: Extreme-jitter episodes (100 per task)")
@@ -204,11 +280,11 @@ def main():
         print(f"  Processing task: {task_key}")
         for i in range(100):
             variant = _extreme_jitter_task(task_data, rng)
-            samples = run_episode(variant, task_key, args.lookahead_depth, args.lookahead_width)
+            samples = run_episode(variant, task_key, lookahead_depth, lookahead_width)
             dataset.extend(samples)
             if (i + 1) % 50 == 0:
                 print(f"    Completed {i+1}/100 episodes... ({len(dataset)} samples so far)")
-    
+
     # ── Phase 3: Hotel-forcing episodes ──
     print("\n" + "=" * 60)
     print("Phase 3: Hotel-forcing episodes (80 per task)")
@@ -217,11 +293,11 @@ def main():
         print(f"  Processing task: {task_key}")
         for i in range(80):
             variant = _hotel_forcing_task(task_data, rng)
-            samples = run_episode(variant, task_key, args.lookahead_depth, args.lookahead_width)
+            samples = run_episode(variant, task_key, lookahead_depth, lookahead_width)
             dataset.extend(samples)
             if (i + 1) % 40 == 0:
                 print(f"    Completed {i+1}/80 episodes... ({len(dataset)} samples so far)")
-    
+
     # ── Phase 4: Downgrade-forcing episodes ──
     print("\n" + "=" * 60)
     print("Phase 4: Downgrade-forcing episodes (80 per task)")
@@ -230,11 +306,11 @@ def main():
         print(f"  Processing task: {task_key}")
         for i in range(80):
             variant = _downgrade_forcing_task(task_data, rng)
-            samples = run_episode(variant, task_key, args.lookahead_depth, args.lookahead_width)
+            samples = run_episode(variant, task_key, lookahead_depth, lookahead_width)
             dataset.extend(samples)
             if (i + 1) % 40 == 0:
                 print(f"    Completed {i+1}/80 episodes... ({len(dataset)} samples so far)")
-    
+
     # ── Phase 5: Partner-heavy episodes ──
     print("\n" + "=" * 60)
     print("Phase 5: Partner-heavy episodes (40 per task)")
@@ -243,34 +319,88 @@ def main():
         print(f"  Processing task: {task_key}")
         for i in range(40):
             variant = _partner_heavy_task(task_data, rng)
-            samples = run_episode(variant, task_key, args.lookahead_depth, args.lookahead_width)
+            samples = run_episode(variant, task_key, lookahead_depth, lookahead_width)
             dataset.extend(samples)
             if (i + 1) % 20 == 0:
                 print(f"    Completed {i+1}/40 episodes... ({len(dataset)} samples so far)")
-    
-    # ── Shuffle the entire dataset for better training ──
+
+    return dataset
+
+
+def _save_and_report(dataset: List[dict], output_path: str, rng: random.Random) -> None:
+    """Shuffle, save, and print action distribution."""
     rng.shuffle(dataset)
-    
-    # ── Save ──
-    with open(args.output, "w", encoding="utf-8") as f:
+
+    with open(output_path, "w", encoding="utf-8") as f:
         for item in dataset:
             f.write(json.dumps(item) + "\n")
-    
-    # ── Print action distribution ──
+
     print("\n" + "=" * 60)
-    print(f"FINAL DATASET: {len(dataset)} samples saved to {args.output}")
+    print(f"FINAL DATASET: {len(dataset)} samples saved to {output_path}")
     print("=" * 60)
-    
+
     action_counts = {}
     for item in dataset:
         action = json.loads(item["messages"][2]["content"]).get("action_type", "unknown")
         action_counts[action] = action_counts.get(action, 0) + 1
-    
+
     print("\nAction Distribution:")
     for action, count in sorted(action_counts.items(), key=lambda x: -x[1]):
         pct = count * 100 / len(dataset)
-        bar = "█" * int(pct)
+        bar = "#" * int(pct)
         print(f"  {action:25s} {count:5d}  ({pct:5.1f}%)  {bar}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate maximum-diversity LLM fine-tuning dataset.")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--lookahead-depth", type=int, default=2)
+    parser.add_argument("--lookahead-width", type=int, default=8)
+    parser.add_argument("--output", default="artifacts/flight_rebooking_sft_final.jsonl")
+    parser.add_argument(
+        "--use-real-flights",
+        action="store_true",
+        default=False,
+        help="Use real flights from CSV instead of hardcoded task templates.",
+    )
+    parser.add_argument(
+        "--csv-path",
+        default="data/flights.csv",
+        help="Path to flights.csv (only used with --use-real-flights).",
+    )
+    args = parser.parse_args()
+
+    rng = random.Random(args.seed)
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+
+    dataset: List[dict] = []
+
+    if args.use_real_flights:
+        from hybrid_task_generator import HybridTaskGenerator
+
+        print("=" * 60)
+        print("MODE: Real flights from CSV (hybrid task generator)")
+        print("=" * 60)
+        gen = HybridTaskGenerator(csv_path=args.csv_path, seed=args.seed)
+        dataset = _run_real_flights_pipeline(
+            gen=gen,
+            dataset=dataset,
+            lookahead_depth=args.lookahead_depth,
+            lookahead_width=args.lookahead_width,
+            rng=rng,
+        )
+    else:
+        print("=" * 60)
+        print("MODE: Hardcoded tasks + jittering (original pipeline)")
+        print("=" * 60)
+        dataset = _run_hardcoded_pipeline(
+            rng=rng,
+            dataset=dataset,
+            lookahead_depth=args.lookahead_depth,
+            lookahead_width=args.lookahead_width,
+        )
+
+    _save_and_report(dataset, args.output, rng)
 
 
 if __name__ == "__main__":

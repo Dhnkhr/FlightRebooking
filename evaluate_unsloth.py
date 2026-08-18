@@ -81,8 +81,8 @@ Policy:
     return float(score)
 
 def main():
-    base_model_name = "unsloth/llama-3-8b-Instruct-bnb-4bit"
-    adapter_path = "./flight-rebooking-lora" # Folder containing your downloaded adapter files
+    base_model_name = "unsloth/Llama-3.2-1B-Instruct-bnb-4bit"
+    adapter_path = "./flight-rebooking-lora-1b" # 1B model trained with hybrid data
     
     print(f"Loading base model: {base_model_name}")
     bnb_config = BitsAndBytesConfig(

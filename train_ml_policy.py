@@ -447,6 +447,49 @@ def _collect_dataset(
     return X, y, summaries
 
 
+def _collect_dataset_real_flights(
+    seed: int,
+    episodes_per_task: int,
+    teacher_policy: str,
+    teacher_lookahead_depth: int,
+    teacher_lookahead_width: int,
+    csv_path: str,
+) -> Tuple[List[List[float]], List[str], List[EpisodeSummary]]:
+    """Collect training data using real flights from CSV."""
+    from hybrid_task_generator import HybridTaskGenerator
+
+    gen = HybridTaskGenerator(csv_path=csv_path, seed=seed)
+    X: List[List[float]] = []
+    y: List[str] = []
+    summaries: List[EpisodeSummary] = []
+
+    for difficulty in ["easy", "medium", "hard"]:
+        print(f"[DATA] Generating {episodes_per_task} real-flight episodes for difficulty={difficulty}")
+        for episode_idx in range(episodes_per_task):
+            task_data = gen.generate_task(difficulty=difficulty)
+            task_key = difficulty  # maps to grading profile
+            samples, summary = _rollout_expert_episode(
+                task_data=task_data,
+                task_key=task_key,
+                episode_index=episode_idx,
+                teacher_policy=teacher_policy,
+                teacher_lookahead_depth=teacher_lookahead_depth,
+                teacher_lookahead_width=teacher_lookahead_width,
+            )
+            summaries.append(summary)
+            for sample in samples:
+                X.append(sample["features"])
+                y.append(sample["label"])
+
+            if (episode_idx + 1) % 100 == 0:
+                print(
+                    f"[DATA] difficulty={difficulty} episodes={episode_idx + 1}/{episodes_per_task} "
+                    f"samples={len(X)} avg_score={mean(s.final_score for s in summaries if s.task_key == task_key):.4f}"
+                )
+
+    return X, y, summaries
+
+
 def _rank_action_types(model: RandomForestClassifier, features: List[float]) -> List[str]:
     probabilities = model.predict_proba([features])[0]
     classes = [str(cls) for cls in model.classes_]
@@ -507,6 +550,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", default="artifacts/ml_policy.pkl", help="Path to save trained policy artifact.")
     parser.add_argument("--report", default="artifacts/ml_policy_report.json", help="Path to save training/eval report.")
+    parser.add_argument(
+        "--use-real-flights",
+        action="store_true",
+        default=False,
+        help="Use real flights from CSV instead of hardcoded task templates.",
+    )
+    parser.add_argument(
+        "--csv-path",
+        default="data/flights.csv",
+        help="Path to flights.csv (only used with --use-real-flights).",
+    )
     return parser.parse_args()
 
 
@@ -523,13 +577,24 @@ def main() -> None:
         f"teacher={args.teacher_policy} "
         f"depth={args.teacher_lookahead_depth} width={args.teacher_lookahead_width}"
     )
-    X, y, episode_summaries = _collect_dataset(
-        seed=args.seed,
-        episodes_per_task=args.episodes_per_task,
-        teacher_policy=args.teacher_policy,
-        teacher_lookahead_depth=args.teacher_lookahead_depth,
-        teacher_lookahead_width=args.teacher_lookahead_width,
-    )
+    if args.use_real_flights:
+        print("[TRAIN] MODE: Real flights from CSV (hybrid task generator)")
+        X, y, episode_summaries = _collect_dataset_real_flights(
+            seed=args.seed,
+            episodes_per_task=args.episodes_per_task,
+            teacher_policy=args.teacher_policy,
+            teacher_lookahead_depth=args.teacher_lookahead_depth,
+            teacher_lookahead_width=args.teacher_lookahead_width,
+            csv_path=args.csv_path,
+        )
+    else:
+        X, y, episode_summaries = _collect_dataset(
+            seed=args.seed,
+            episodes_per_task=args.episodes_per_task,
+            teacher_policy=args.teacher_policy,
+            teacher_lookahead_depth=args.teacher_lookahead_depth,
+            teacher_lookahead_width=args.teacher_lookahead_width,
+        )
 
     if not X:
         raise SystemExit("No training data generated.")

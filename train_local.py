@@ -1,5 +1,5 @@
 """
-Local Training Script for RTX 4060 (8GB VRAM) — Windows Compatible
+Local Training Script for RTX 3050 (4GB/6GB VRAM) — Windows Compatible
 Pure PyTorch + PEFT — No TRL dependency needed!
 """
 import json
@@ -7,7 +7,7 @@ import os
 import sys
 import torch
 print("=" * 60)
-print("Flight Rebooking Agent — Local Training (RTX 4060)")
+print("Flight Rebooking Agent — Local Training (RTX 3050 / Llama 3.2 1B)")
 print("=" * 60)
 print(f"CUDA available: {torch.cuda.is_available()}")
 print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None'}")
@@ -17,16 +17,16 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
-# Disable the caching_allocator_warmup that tries to pre-allocate 5GB (OOM on 8GB GPUs)
+# Disable the caching_allocator_warmup that tries to pre-allocate memory
 import transformers.modeling_utils
 transformers.modeling_utils.caching_allocator_warmup = lambda *args, **kwargs: None
-print("Patched: Disabled caching_allocator_warmup for 8GB GPU compatibility")
+print("Patched: Disabled caching_allocator_warmup for low-VRAM GPU compatibility")
 
 # ── Configuration ──
-MODEL_NAME = "unsloth/Llama-3.2-3B-Instruct-bnb-4bit"
-DATASET_PATH = "artifacts/flight_rebooking_sft_final.jsonl"
-OUTPUT_DIR = "./flight-rebooking-lora"
-MAX_SEQ_LENGTH = 768
+MODEL_NAME = "unsloth/Llama-3.2-1B-Instruct-bnb-4bit"
+DATASET_PATH = "artifacts/flight_rebooking_sft_real_large.jsonl"
+OUTPUT_DIR = "./flight-rebooking-lora-1b"
+MAX_SEQ_LENGTH = 512
 BATCH_SIZE = 1
 GRAD_ACCUM_STEPS = 8
 LEARNING_RATE = 2e-4
