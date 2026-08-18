@@ -131,11 +131,18 @@ def _partner_heavy_task(task_data: Dict[str, Any], rng: random.Random) -> Dict[s
 
 
 def run_episode(task_data: Dict[str, Any], task_key: str, lookahead_depth: int, lookahead_width: int) -> List[dict]:
-    """Run a single episode and collect training samples."""
-    samples = []
+    """Run a single episode and collect ONE multi-turn training sample.
+    
+    Returns a list with a single dict containing the full conversation:
+      system → user(obs1) → assistant(action1) → user(obs2) → assistant(action2) → ... → assistant(finalize)
+    """
     env = FlightRebookingEnv(task_data=task_data)
     observation = env.reset()
     done = False
+    
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT.strip()},
+    ]
     
     while not done:
         observation_json = observation.model_dump_json()
@@ -156,18 +163,20 @@ def run_episode(task_data: Dict[str, Any], task_key: str, lookahead_depth: int, 
         user_content = f"Current observation: {observation_json}"
         assistant_content = json.dumps(action_payload)
         
-        samples.append({
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT.strip()},
-                {"role": "user", "content": user_content},
-                {"role": "assistant", "content": assistant_content}
-            ]
-        })
+        messages.append({"role": "user", "content": user_content})
+        messages.append({"role": "assistant", "content": assistant_content})
         
         action = Action(**action_payload)
         observation, _, done, _ = env.step(action)
     
-    return samples
+    # Ensure the episode ends with a finalize action if the last action wasn't one
+    last_assistant = json.loads(messages[-1]["content"])
+    if last_assistant.get("action_type") != "finalize":
+        final_obs = observation.model_dump_json()
+        messages.append({"role": "user", "content": f"Current observation: {final_obs}"})
+        messages.append({"role": "assistant", "content": json.dumps({"action_type": "finalize"})})
+    
+    return [{"messages": messages}]
 
 
 def _run_real_flights_pipeline(
@@ -177,77 +186,80 @@ def _run_real_flights_pipeline(
     lookahead_width: int,
     rng: random.Random,
 ) -> List[dict]:
-    """Generate comprehensive SFT data using real flights with all 5 edge-case phases."""
+    """Generate comprehensive SFT data using real flights with all 5 edge-case phases.
+    
+    Each episode is now a full multi-turn conversation, so fewer episodes are needed.
+    """
     difficulties = ["easy", "medium", "hard"]
 
     # Phase 1: Standard real-flight episodes
     print("\n" + "=" * 60)
-    print("Phase 1: Standard real-flight episodes (300 per difficulty)")
-    print("=" * 60)
-    for difficulty in difficulties:
-        print(f"  Processing difficulty: {difficulty}")
-        for i in range(300):
-            task_data = gen.generate_task(difficulty=difficulty)
-            samples = run_episode(task_data, difficulty, lookahead_depth, lookahead_width)
-            dataset.extend(samples)
-            if (i + 1) % 100 == 0:
-                print(f"    Completed {i+1}/300 episodes... ({len(dataset)} samples so far)")
-
-    # Phase 2: Extreme-jitter real-flight episodes
-    print("\n" + "=" * 60)
-    print("Phase 2: Extreme-jitter real-flight episodes (150 per difficulty)")
+    print("Phase 1: Standard real-flight episodes (150 per difficulty)")
     print("=" * 60)
     for difficulty in difficulties:
         print(f"  Processing difficulty: {difficulty}")
         for i in range(150):
+            task_data = gen.generate_task(difficulty=difficulty)
+            samples = run_episode(task_data, difficulty, lookahead_depth, lookahead_width)
+            dataset.extend(samples)
+            if (i + 1) % 50 == 0:
+                print(f"    Completed {i+1}/150 episodes... ({len(dataset)} episodes so far)")
+
+    # Phase 2: Extreme-jitter real-flight episodes
+    print("\n" + "=" * 60)
+    print("Phase 2: Extreme-jitter real-flight episodes (75 per difficulty)")
+    print("=" * 60)
+    for difficulty in difficulties:
+        print(f"  Processing difficulty: {difficulty}")
+        for i in range(75):
             base_task = gen.generate_task(difficulty=difficulty)
             variant = _extreme_jitter_task(base_task, rng)
             samples = run_episode(variant, difficulty, lookahead_depth, lookahead_width)
             dataset.extend(samples)
-            if (i + 1) % 50 == 0:
-                print(f"    Completed {i+1}/150 episodes... ({len(dataset)} samples so far)")
+            if (i + 1) % 25 == 0:
+                print(f"    Completed {i+1}/75 episodes... ({len(dataset)} episodes so far)")
 
     # Phase 3: Hotel-forcing real-flight episodes
     print("\n" + "=" * 60)
-    print("Phase 3: Hotel-forcing real-flight episodes (100 per difficulty)")
+    print("Phase 3: Hotel-forcing real-flight episodes (50 per difficulty)")
     print("=" * 60)
     for difficulty in difficulties:
         print(f"  Processing difficulty: {difficulty}")
-        for i in range(100):
+        for i in range(50):
             base_task = gen.generate_task(difficulty=difficulty)
             variant = _hotel_forcing_task(base_task, rng)
             samples = run_episode(variant, difficulty, lookahead_depth, lookahead_width)
             dataset.extend(samples)
-            if (i + 1) % 50 == 0:
-                print(f"    Completed {i+1}/100 episodes... ({len(dataset)} samples so far)")
+            if (i + 1) % 25 == 0:
+                print(f"    Completed {i+1}/50 episodes... ({len(dataset)} episodes so far)")
 
     # Phase 4: Downgrade-forcing real-flight episodes
     print("\n" + "=" * 60)
-    print("Phase 4: Downgrade-forcing real-flight episodes (100 per difficulty)")
+    print("Phase 4: Downgrade-forcing real-flight episodes (50 per difficulty)")
     print("=" * 60)
     for difficulty in difficulties:
         print(f"  Processing difficulty: {difficulty}")
-        for i in range(100):
+        for i in range(50):
             base_task = gen.generate_task(difficulty=difficulty)
             variant = _downgrade_forcing_task(base_task, rng)
             samples = run_episode(variant, difficulty, lookahead_depth, lookahead_width)
             dataset.extend(samples)
-            if (i + 1) % 50 == 0:
-                print(f"    Completed {i+1}/100 episodes... ({len(dataset)} samples so far)")
+            if (i + 1) % 25 == 0:
+                print(f"    Completed {i+1}/50 episodes... ({len(dataset)} episodes so far)")
 
     # Phase 5: Partner-heavy real-flight episodes
     print("\n" + "=" * 60)
-    print("Phase 5: Partner-heavy real-flight episodes (100 per difficulty)")
+    print("Phase 5: Partner-heavy real-flight episodes (50 per difficulty)")
     print("=" * 60)
     for difficulty in difficulties:
         print(f"  Processing difficulty: {difficulty}")
-        for i in range(100):
+        for i in range(50):
             base_task = gen.generate_task(difficulty=difficulty)
             variant = _partner_heavy_task(base_task, rng)
             samples = run_episode(variant, difficulty, lookahead_depth, lookahead_width)
             dataset.extend(samples)
-            if (i + 1) % 50 == 0:
-                print(f"    Completed {i+1}/100 episodes... ({len(dataset)} samples so far)")
+            if (i + 1) % 25 == 0:
+                print(f"    Completed {i+1}/50 episodes... ({len(dataset)} episodes so far)")
 
     return dataset
 
@@ -336,17 +348,33 @@ def _save_and_report(dataset: List[dict], output_path: str, rng: random.Random) 
             f.write(json.dumps(item) + "\n")
 
     print("\n" + "=" * 60)
-    print(f"FINAL DATASET: {len(dataset)} samples saved to {output_path}")
+    print(f"FINAL DATASET: {len(dataset)} episodes saved to {output_path}")
     print("=" * 60)
 
+    # Count turns per episode
+    turn_counts = []
     action_counts = {}
     for item in dataset:
-        action = json.loads(item["messages"][2]["content"]).get("action_type", "unknown")
-        action_counts[action] = action_counts.get(action, 0) + 1
+        msgs = item["messages"]
+        assistant_msgs = [m for m in msgs if m["role"] == "assistant"]
+        turn_counts.append(len(assistant_msgs))
+        for m in assistant_msgs:
+            try:
+                action = json.loads(m["content"]).get("action_type", "unknown")
+            except (json.JSONDecodeError, AttributeError):
+                action = "unknown"
+            action_counts[action] = action_counts.get(action, 0) + 1
+
+    total_actions = sum(action_counts.values())
+    print(f"\nEpisode stats:")
+    print(f"  Episodes: {len(dataset)}")
+    print(f"  Total actions: {total_actions}")
+    print(f"  Avg turns/episode: {sum(turn_counts)/len(turn_counts):.1f}")
+    print(f"  Min turns: {min(turn_counts)}, Max turns: {max(turn_counts)}")
 
     print("\nAction Distribution:")
     for action, count in sorted(action_counts.items(), key=lambda x: -x[1]):
-        pct = count * 100 / len(dataset)
+        pct = count * 100 / total_actions
         bar = "#" * int(pct)
         print(f"  {action:25s} {count:5d}  ({pct:5.1f}%)  {bar}")
 

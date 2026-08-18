@@ -1,7 +1,10 @@
 import json
+# pyrefly: ignore [missing-import]
 import torch
 import os
+# pyrefly: ignore [missing-import]
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+# pyrefly: ignore [missing-import]
 from peft import PeftModel
 from environment import FlightRebookingEnv, Action, ActionType
 from tasks import TASKS, grade_task
@@ -40,11 +43,23 @@ Policy:
 - Minimize budget usage.
 - Output raw JSON only."""
 
-    while not done:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Current observation: {obs.model_dump_json()}"}
-        ]
+    # Maintain conversation history across turns (matches multi-turn training format)
+    messages = [
+        {"role": "system", "content": system_prompt},
+    ]
+    
+    max_turns = 30  # Safety limit
+    turn = 0
+    
+    while not done and turn < max_turns:
+        turn += 1
+        
+        # Append current observation as user message
+        messages.append({"role": "user", "content": f"Current observation: {obs.model_dump_json()}"})
+        
+        # Keep conversation manageable: if too long, keep system + last N turns
+        if len(messages) > 21:  # system + 10 turn pairs
+            messages = [messages[0]] + messages[-20:]
         
         inputs = tokenizer.apply_chat_template(
             messages,
@@ -61,11 +76,16 @@ Policy:
         
         action_dict = extract_json(response_text)
         
+        # Append assistant response to history
+        messages.append({"role": "assistant", "content": json.dumps(action_dict)})
+        
         # Stuck-Agent Loop Breaker
         action_str = json.dumps(action_dict)
         if hasattr(env, '_last_action_str') and env._last_action_str == action_str:
             print(f"[WARN] Agent stuck! Forcing skip for {action_dict.get('passenger_id', 'Unknown')}.")
             action_dict = {"action_type": "mark_no_solution", "passenger_id": action_dict.get("passenger_id", "P1")}
+            # Update the last assistant message in history
+            messages[-1] = {"role": "assistant", "content": json.dumps(action_dict)}
         env._last_action_str = json.dumps(action_dict)
         
         try:

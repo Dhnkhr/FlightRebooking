@@ -24,9 +24,9 @@ print("Patched: Disabled caching_allocator_warmup for low-VRAM GPU compatibility
 
 # ── Configuration ──
 MODEL_NAME = "unsloth/Llama-3.2-1B-Instruct-bnb-4bit"
-DATASET_PATH = "artifacts/flight_rebooking_sft_real_large.jsonl"
+DATASET_PATH = "artifacts/flight_rebooking_sft_multiturn.jsonl"
 OUTPUT_DIR = "./flight-rebooking-lora-1b"
-MAX_SEQ_LENGTH = 512
+MAX_SEQ_LENGTH = 2048  # Multi-turn episodes need more context
 BATCH_SIZE = 1
 GRAD_ACCUM_STEPS = 8
 LEARNING_RATE = 2e-4
