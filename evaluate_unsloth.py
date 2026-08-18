@@ -50,19 +50,21 @@ Policy:
             messages,
             tokenize=True,
             add_generation_prompt=True,
-            return_tensors="pt"
+            return_tensors="pt",
+            return_dict=True
         ).to("cuda")
         
+        input_len = inputs["input_ids"].shape[1]
         with torch.no_grad():
-            outputs = model.generate(inputs, max_new_tokens=64, use_cache=True, do_sample=False)
-        response_text = tokenizer.decode(outputs[0][inputs.shape[1]:], skip_special_tokens=True)
+            outputs = model.generate(**inputs, max_new_tokens=64, use_cache=True, do_sample=False)
+        response_text = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True)
         
         action_dict = extract_json(response_text)
         
         # Stuck-Agent Loop Breaker
         action_str = json.dumps(action_dict)
         if hasattr(env, '_last_action_str') and env._last_action_str == action_str:
-            print(f"⚠️ Agent stuck! Forcing skip for {action_dict.get('passenger_id', 'Unknown')}.")
+            print(f"[WARN] Agent stuck! Forcing skip for {action_dict.get('passenger_id', 'Unknown')}.")
             action_dict = {"action_type": "mark_no_solution", "passenger_id": action_dict.get("passenger_id", "P1")}
         env._last_action_str = json.dumps(action_dict)
         
@@ -71,7 +73,7 @@ Policy:
         except Exception:
             action = Action(action_type=ActionType.FINALIZE)
             
-        print(f"🤖 LLM chose: {action.model_dump_json()}")
+        print(f"[LLM] chose: {action.model_dump_json()}")
         obs, reward, done, info = env.step(action)
         
     final_state = env.state()
@@ -119,7 +121,7 @@ def main():
         total_score += score
         
     print("\n===============================")
-    print("🏁 FINAL HACKATHON EVALUATION")
+    print("FINAL HACKATHON EVALUATION")
     print("===============================")
     for k, v in scores.items():
         print(f"Task {k:6s} | Score: {v:.4f}")
