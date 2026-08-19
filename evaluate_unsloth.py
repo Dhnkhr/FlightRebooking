@@ -58,10 +58,15 @@ Policy:
         # Append current observation as user message
         messages.append({"role": "user", "content": f"Current observation: {obs.model_dump_json()}"})
         
-        # Aggressive truncation for 4GB VRAM: keep system + last 3 turn pairs
-        if len(messages) > 7:  # system + 3 user/assistant pairs
-            messages = [messages[0]] + messages[-6:]
+        # Context truncation for 4GB VRAM: keep system + last 7 turn pairs (15 messages total)
+        # This gives enough memory for Hard task (7 passengers) without forgetting earlier actions
+        if len(messages) > 15:
+            messages = [messages[0]] + messages[-14:]
         
+        # Clear CUDA memory cache before generation to prevent VRAM fragmentation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
         inputs = tokenizer.apply_chat_template(
             messages,
             tokenize=True,
@@ -76,6 +81,14 @@ Policy:
         response_text = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True)
         
         action_dict = extract_json(response_text)
+        
+        # Auto-correct: if model outputs rebook_passenger for a partner flight, fix action_type to rebook_on_partner
+        flight_id = action_dict.get("flight_id")
+        if flight_id and action_dict.get("action_type") == "rebook_passenger":
+            flights_by_id = {f["id"]: f for f in obs.model_dump().get("available_flights", [])}
+            target_flight = flights_by_id.get(flight_id)
+            if target_flight and target_flight.get("is_partner"):
+                action_dict["action_type"] = "rebook_on_partner"
         
         # Append assistant response to history
         messages.append({"role": "assistant", "content": json.dumps(action_dict)})
