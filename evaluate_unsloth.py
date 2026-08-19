@@ -50,6 +50,7 @@ Policy:
     
     max_turns = 30  # Safety limit
     turn = 0
+    recent_actions = []  # Track last few actions for cycle detection
     
     while not done and turn < max_turns:
         turn += 1
@@ -57,9 +58,9 @@ Policy:
         # Append current observation as user message
         messages.append({"role": "user", "content": f"Current observation: {obs.model_dump_json()}"})
         
-        # Keep conversation manageable: if too long, keep system + last N turns
-        if len(messages) > 21:  # system + 10 turn pairs
-            messages = [messages[0]] + messages[-20:]
+        # Aggressive truncation for 4GB VRAM: keep system + last 3 turn pairs
+        if len(messages) > 7:  # system + 3 user/assistant pairs
+            messages = [messages[0]] + messages[-6:]
         
         inputs = tokenizer.apply_chat_template(
             messages,
@@ -79,14 +80,21 @@ Policy:
         # Append assistant response to history
         messages.append({"role": "assistant", "content": json.dumps(action_dict)})
         
-        # Stuck-Agent Loop Breaker
+        # Cycle detection: check if action repeats within last 3 turns
         action_str = json.dumps(action_dict)
-        if hasattr(env, '_last_action_str') and env._last_action_str == action_str:
-            print(f"[WARN] Agent stuck! Forcing skip for {action_dict.get('passenger_id', 'Unknown')}.")
+        recent_actions.append(action_str)
+        if len(recent_actions) > 6:
+            recent_actions = recent_actions[-6:]
+        
+        is_stuck = False
+        if recent_actions.count(action_str) >= 2:
+            is_stuck = True
+        
+        if is_stuck:
+            print(f"[WARN] Agent stuck in cycle! Forcing skip for {action_dict.get('passenger_id', 'Unknown')}.")
             action_dict = {"action_type": "mark_no_solution", "passenger_id": action_dict.get("passenger_id", "P1")}
-            # Update the last assistant message in history
             messages[-1] = {"role": "assistant", "content": json.dumps(action_dict)}
-        env._last_action_str = json.dumps(action_dict)
+            recent_actions[-1] = json.dumps(action_dict)
         
         try:
             action = Action(**action_dict)
